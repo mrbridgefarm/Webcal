@@ -1,9 +1,10 @@
-import { createDAVClient, DAVCalendar } from 'tsdav';
+import { createDAVClient } from 'tsdav';
 import {
   CalendarEventDTO,
   parseIcsToEvents,
   buildIcsFromEvent,
-  AttendeeDTO
+  AttendeeDTO,
+  normalizeDanishText
 } from './icalMapper.js';
 
 export interface CalDavCredentials {
@@ -98,6 +99,20 @@ export function buildSogoUserCalendarHomeUrl(serverUrl: string, username: string
 }
 
 /**
+ * Læser en HTTP-response med intelligent detektion mellem UTF-8 og ISO-8859-1 / Windows-1252,
+ * så danske tegn (æ, ø, å, Æ, Ø, Å) aldrig bliver til spørgsmålstegn () eller mojibake.
+ */
+async function readResponseTextSmart(res: Response): Promise<string> {
+  const arrayBuffer = await res.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuffer);
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(uint8);
+  } catch {
+    return new TextDecoder('windows-1252').decode(uint8);
+  }
+}
+
+/**
  * Direkte, status-tjekket HTTP/DAV-request mod Mailcow/SOGo.
  */
 async function davRequest(
@@ -112,13 +127,14 @@ async function davRequest(
     method,
     headers: {
       Authorization: `Basic ${auth}`,
+      'Accept-Charset': 'utf-8, iso-8859-1;q=0.5',
       ...extraHeaders
     },
-    body
+    body: body !== undefined ? Buffer.from(body, 'utf8') : undefined
   });
 
   if (!res.ok) {
-    const text = (await res.text().catch(() => '')).slice(0, 300);
+    const text = (await readResponseTextSmart(res).catch(() => '')).slice(0, 300);
     throw new Error(`CalDAV ${method} mod ${url} fejlede (HTTP ${res.status} ${res.statusText})${text ? `: ${text}` : ''}`);
   }
   return res;
@@ -169,7 +185,7 @@ async function fetchCalendarsDirectPropfind(
     Depth: depth
   });
 
-  const xml = await res.text();
+  const xml = await readResponseTextSmart(res);
   const baseOrigin = new URL(targetUrl).origin;
   const normalizedUser = creds.username.toLowerCase().trim();
 
@@ -200,7 +216,7 @@ async function fetchCalendarsDirectPropfind(
 
     const displayNameMatch = block.match(/<(?:[a-zA-Z0-9]+:)?displayname[^>]*>([\s\S]*?)<\/(?:[a-zA-Z0-9]+:)?displayname>/i);
     const rawName = displayNameMatch
-      ? displayNameMatch[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim()
+      ? normalizeDanishText(displayNameMatch[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim())
       : '';
 
     const colorMatch = block.match(/<(?:[a-zA-Z0-9]+:)?calendar-color[^>]*>([^<]+)<\/(?:[a-zA-Z0-9]+:)?calendar-color>/i);
@@ -261,7 +277,7 @@ export async function fetchCalendars(creds: CalDavCredentials): Promise<Calendar
         FALLBACK_COLORS[discoveredByUrl.size % FALLBACK_COLORS.length];
       const displayName =
         typeof cal.displayName === 'string' && cal.displayName.trim()
-          ? cal.displayName.trim()
+          ? normalizeDanishText(cal.displayName.trim())
           : `Kalender ${discoveredByUrl.size + 1}`;
 
       const { isShared, readOnly, owner } = detectCalendarPermissionsFromUrlAndName(
@@ -398,7 +414,7 @@ async function fetchEventsFromCalendarDirectReport(
     Depth: '1'
   });
 
-  const xml = await res.text();
+  const xml = await readResponseTextSmart(res);
   const baseOrigin = new URL(calUrl).origin;
   const responseBlocks = xml.match(/<(?:[a-zA-Z0-9]+:)?response\b[\s\S]*?<\/(?:[a-zA-Z0-9]+:)?response>/gi) || [];
   const events: CalendarEventDTO[] = [];
@@ -408,13 +424,11 @@ async function fetchEventsFromCalendarDirectReport(
     const dataMatch = block.match(/<(?:[a-zA-Z0-9]+:)?calendar-data[^>]*>([\s\S]*?)<\/(?:[a-zA-Z0-9]+:)?calendar-data>/i);
     if (!dataMatch) continue;
 
-    let rawIcs = dataMatch[1]
-      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&amp;/g, '&')
-      .trim();
+    const rawIcs = normalizeDanishText(
+      dataMatch[1]
+        .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+        .trim()
+    );
 
     if (!rawIcs.includes('BEGIN:VCALENDAR')) continue;
 

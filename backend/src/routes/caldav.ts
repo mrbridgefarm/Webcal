@@ -20,10 +20,19 @@ import {
 
 export const caldavRouter = Router();
 
+function safeDecodeHeader(val?: string): string {
+  if (!val) return '';
+  try {
+    return decodeURIComponent(val);
+  } catch {
+    return val;
+  }
+}
+
 function extractCredentials(req: Request): CalDavCredentials {
-  const headerServer = req.headers['x-caldav-server'] as string | undefined;
-  const headerUser = req.headers['x-caldav-user'] as string | undefined;
-  const headerPass = req.headers['x-caldav-password'] as string | undefined;
+  const headerServer = safeDecodeHeader(req.headers['x-caldav-server'] as string | undefined);
+  const headerUser = safeDecodeHeader(req.headers['x-caldav-user'] as string | undefined);
+  const headerPass = safeDecodeHeader(req.headers['x-caldav-password'] as string | undefined);
 
   const serverUrl =
     req.body?.serverUrl ||

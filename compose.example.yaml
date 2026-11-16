@@ -23,7 +23,7 @@ services:
       - NODE_ENV=production
       - PORT=3000
       # Standard Mailcow/SOGo CalDAV URL som appen forbinder til ved login:
-      - DEFAULT_CALDAV_URL=${DEFAULT_CALDAV_URL:-https://post2ko.bridgefarm.dk/SOGo/dav/}
+      - DEFAULT_CALDAV_URL=${DEFAULT_CALDAV_URL:-https://mail.ditdomæne.dk/SOGo/dav/}
       # Sæt til true hvis Mailcow kører med selv-signeret certifikat internt:
       - ALLOW_INSECURE_TLS=${ALLOW_INSECURE_TLS:-false}
 

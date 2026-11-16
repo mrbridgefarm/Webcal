@@ -35,10 +35,10 @@ export interface PublicShareResponse {
 
 function buildAuthHeaders(session: AuthSession): Record<string, string> {
   return {
-    'Content-Type': 'application/json',
-    'x-caldav-server': session.serverUrl || '',
-    'x-caldav-user': session.username || '',
-    'x-caldav-password': session.password || ''
+    'Content-Type': 'application/json; charset=utf-8',
+    'x-caldav-server': encodeURIComponent(session.serverUrl || ''),
+    'x-caldav-user': encodeURIComponent(session.username || ''),
+    'x-caldav-password': encodeURIComponent(session.password || '')
   };
 }
 

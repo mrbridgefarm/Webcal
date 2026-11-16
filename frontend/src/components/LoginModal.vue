@@ -125,7 +125,7 @@ function tryClose() {
               v-model="serverUrl"
               type="text"
               required
-              placeholder="https://post2ko.bridgefarm.dk/SOGo/dav/"
+              placeholder="Indtast serveradresse (f.eks. https://mail.domæne.dk/SOGo/dav/)"
               class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
             />
             <p class="text-[11px] text-slate-500 mt-1">
@@ -142,7 +142,7 @@ function tryClose() {
               type="email"
               required
               autofocus
-              placeholder="mail@bridgefarm.dk"
+              placeholder="Indtast mailadresse"
               class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
             />
           </div>

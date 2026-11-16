@@ -36,6 +36,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
 COPY backend/package.json ./
 COPY --from=backend-builder /app/backend/node_modules ./node_modules

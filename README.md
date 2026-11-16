@@ -101,7 +101,7 @@ I **Pangolin** kan du pege direkte på **`http://dav-sync-cal:3000`** (eller til
 | Variabel | Standard | Beskrivelse |
 | :--- | :--- | :--- |
 | `PORT` | `3000` | Porten som webkalenderen og CalDAV-proxyen lytter på |
-| `DEFAULT_CALDAV_URL` | *(tom)* | Valgfri standard Mailcow URL (f.eks. `https://post2ko.bridgefarm.dk/SOGo/dav/`) |
+| `DEFAULT_CALDAV_URL` | *(tom)* | Valgfri standard Mailcow URL (f.eks. `https://mail.ditdomæne.dk/SOGo/dav/`) |
 | `ALLOW_INSECURE_TLS` | `false` | Sæt til `true` hvis din Mailcow-server bruger selv-signeret certifikat på LAN |
 
 ---

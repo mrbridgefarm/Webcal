@@ -31,6 +31,36 @@ export interface CalendarEventDTO {
 const VIDEO_URL_REGEX = /(https?:\/\/(?:[^\s"]*zoom\.us|teams\.microsoft\.com|meet\.google\.com|jitsi\.[^\s"]+|whereby\.com)[^\s">]*)/i;
 
 /**
+ * Sikrer korrekt dansk UTF-8 tekst (æøå / ÆØÅ):
+ * 1) Dekoder eventuelle XML/HTML numeriske og hexadecimale entiteter (&#230;, &#xE6; osv.)
+ * 2) Retter evt. ISO-8859-1 / Latin-1 mojibake (f.eks. Ã¦ -> æ, Ã¸ -> ø, Ã¥ -> å, Ã† -> Æ, Ã˜ -> Ø, Ã… -> Å)
+ */
+export function normalizeDanishText(input?: string | null): string {
+  if (!input || typeof input !== 'string') return '';
+  let text = input
+    .replace(/&#(\d+);/g, (_m, dec) => String.fromCodePoint(Number(dec)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+
+  // Hvis strengen indeholder typiske UTF-8-som-ISO-8859-1 sekvenser (Ã¦, Ã¸, Ã¥, Ã†, Ã˜, Ã…)
+  if (/Ã[\u0080-\u00BF]/.test(text)) {
+    try {
+      const bytes = Buffer.from(text, 'latin1');
+      const utf8 = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      text = utf8;
+    } catch {
+      // behold eksisterende tekst hvis den ikke er ren latin1-mojibake
+    }
+  }
+
+  return text;
+}
+
+/**
  * Parser en rå iCalendar (.ics) streng fra Mailcow/SOGo til et struktureret CalendarEventDTO.
  * Understøtter VTIMEZONE via ical.js TimezoneService, ATTENDEE/PARTSTAT (RSVP) og VALARM.
  */
@@ -68,8 +98,8 @@ export function parseIcsToEvents(
       const startIso = startDate ? startDate.toJSDate().toISOString() : new Date().toISOString();
       const endIso = endDate ? endDate.toJSDate().toISOString() : startIso;
 
-      const description = event.description || '';
-      const location = event.location || '';
+      const description = normalizeDanishText(event.description || '');
+      const location = normalizeDanishText(event.location || '');
 
       // Udtræk evt. videomøde-link fra URL-felt, lokation eller beskrivelse
       const urlProp = veventComp.getFirstPropertyValue('url');
@@ -107,7 +137,7 @@ export function parseIcsToEvents(
 
         return {
           email,
-          name: typeof cn === 'string' ? cn : email.split('@')[0],
+          name: normalizeDanishText(typeof cn === 'string' ? cn : email.split('@')[0]),
           partstat,
           role,
           isOrganizer: organizer ? email.toLowerCase() === organizer.toLowerCase() : false
@@ -128,7 +158,7 @@ export function parseIcsToEvents(
         id: `${calendarId}::${uid}`,
         uid,
         calendarId,
-        title: event.summary || '(Ingen titel)',
+        title: normalizeDanishText(event.summary) || '(Ingen titel)',
         start: startIso,
         end: endIso,
         allDay,
