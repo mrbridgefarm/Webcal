@@ -254,7 +254,7 @@ const calendarOptions = computed<CalendarOptions>(() => ({
   firstDay: 1,
   headerToolbar: false,
   height: '100%',
-  expandRows: true,
+  expandRows: false,
   fixedWeekCount: false,
   // Kravspecifikation: Plads til op til 7 synlige begivenheder pr. dag, derefter "+ X flere"
   dayMaxEvents: 7,
