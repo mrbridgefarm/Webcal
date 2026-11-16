@@ -7,11 +7,16 @@ import {
   Scissors,
   Bell,
   ShieldCheck,
-  Keyboard
+  Keyboard,
+  ClipboardPaste,
+  Copy,
+  X,
+  Clock
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../stores/calendarStore';
 import { requestNotificationPermission } from '../services/notifications';
-import { ref } from 'vue';
+import type { CalendarEvent } from '../types/calendar';
+import { ref, computed } from 'vue';
 
 const store = useCalendarStore();
 const notifPermission = ref<string>(
@@ -19,6 +24,12 @@ const notifPermission = ref<string>(
     ? Notification.permission
     : 'denied'
 );
+
+const selectedEventsList = computed<CalendarEvent[]>(() => {
+  if (store.selectedEventIds.length === 0) return [];
+  const idSet = new Set(store.selectedEventIds);
+  return store.events.filter((e) => idSet.has(e.id));
+});
 
 async function enableNotifications() {
   const perm = await requestNotificationPermission();
@@ -36,11 +47,42 @@ function handleColorChange(calId: string, event: Event) {
     void store.setCalendarColorOverride(calId, input.value);
   }
 }
+
+function formatEventTimeSpan(ev: CalendarEvent): string {
+  const startDt = new Date(ev.start);
+  const datePart = startDt.toLocaleDateString('da-DK', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short'
+  });
+  if (ev.allDay) {
+    return `${datePart} • Heldag`;
+  }
+  const startTime = startDt.toLocaleTimeString('da-DK', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  const endDt = new Date(ev.end || ev.start);
+  const endTime = endDt.toLocaleTimeString('da-DK', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  return `${datePart} • ${startTime} - ${endTime}`;
+}
+
+function removeSingleClipboardEvent(evId: string) {
+  const remaining = store.clipboard.events.filter((e) => e.id !== evId);
+  if (remaining.length === 0) {
+    store.clearClipboard();
+  } else {
+    store.clipboard.events = remaining;
+  }
+}
 </script>
 
 <template>
-  <aside class="w-72 bg-slate-900/90 border-r border-slate-800 flex flex-col justify-between p-4 select-none overflow-y-auto shrink-0">
-    <div class="space-y-6">
+  <aside class="w-76 bg-slate-900/90 border-r border-slate-800 flex flex-col justify-between p-4 select-none overflow-y-auto shrink-0">
+    <div class="space-y-5">
       <!-- Kalendere (Egne & Delte SOGo) -->
       <div>
         <div class="flex items-center justify-between mb-2.5">
@@ -135,38 +177,115 @@ function handleColorChange(calId: string, event: Event) {
         </select>
       </div>
 
-      <!-- Aktiv Udklipsholder ("Drysset" Copy/Paste status) -->
-      <div class="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2">
+      <!-- Aktiv Udklipsholder ("Drysset" Copy/Paste boks) -->
+      <div
+        class="p-3 rounded-xl border transition-all space-y-2.5"
+        :class="store.clipboard.events.length > 0
+          ? 'bg-emerald-950/20 border-emerald-500/50 shadow-lg shadow-emerald-950/20'
+          : 'bg-slate-950/90 border-slate-800'"
+      >
         <div class="flex items-center justify-between">
-          <div class="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
-            <Clipboard v-if="store.clipboard.mode !== 'CUT'" class="w-3.5 h-3.5 text-blue-400" />
-            <Scissors v-else class="w-3.5 h-3.5 text-amber-400" />
+          <div class="flex items-center gap-1.5 text-xs font-bold text-slate-100">
+            <Clipboard v-if="store.clipboard.mode !== 'CUT'" class="w-4 h-4 text-emerald-400" />
+            <Scissors v-else class="w-4 h-4 text-amber-400" />
             <span>Udklipsholder</span>
           </div>
-          <span
-            v-if="store.clipboard.events.length > 0"
-            class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300"
-          >
-            {{ store.clipboard.mode === 'CUT' ? 'KLIP' : 'KOPI' }} ({{ store.clipboard.events.length }})
-          </span>
+
+          <div v-if="store.clipboard.events.length > 0" class="flex items-center gap-1.5">
+            <span
+              class="text-[10px] font-bold px-2 py-0.5 rounded-full"
+              :class="store.clipboard.mode === 'CUT'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'"
+            >
+              {{ store.clipboard.mode === 'CUT' ? 'KLIPPET' : 'KOPIERET' }} ({{ store.clipboard.events.length }})
+            </span>
+            <button
+              type="button"
+              class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition"
+              title="Tøm udklipsholder"
+              @click="store.clearClipboard()"
+            >
+              <X class="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
-        <div v-if="store.clipboard.events.length > 0" class="space-y-1.5">
-          <div
-            v-for="ev in store.clipboard.events.slice(0, 3)"
-            :key="ev.id"
-            class="text-xs text-slate-300 bg-slate-900 px-2 py-1 rounded border border-slate-800 truncate"
-          >
-            {{ ev.title }}
+        <!-- Liste over kopierede/klippede aftaler i udklipsholderen -->
+        <div v-if="store.clipboard.events.length > 0" class="space-y-2">
+          <div class="max-h-48 overflow-y-auto space-y-1.5 pr-0.5">
+            <div
+              v-for="ev in store.clipboard.events"
+              :key="ev.id"
+              class="p-2 rounded-lg bg-slate-900/95 border border-slate-700/80 flex items-start justify-between gap-2"
+            >
+              <div class="flex items-start gap-2 min-w-0">
+                <span
+                  class="w-2.5 h-2.5 rounded-full shrink-0 mt-1"
+                  :style="{ backgroundColor: store.getCalendarById(ev.calendarId)?.color || '#10b981' }"
+                ></span>
+                <div class="min-w-0">
+                  <div class="text-xs font-semibold text-slate-100 truncate" :title="ev.title">
+                    {{ ev.title }}
+                  </div>
+                  <div class="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5">
+                    <Clock class="w-2.5 h-2.5 shrink-0" />
+                    <span class="truncate">{{ formatEventTimeSpan(ev) }}</span>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="text-slate-500 hover:text-rose-400 p-0.5 shrink-0"
+                title="Fjern fra udklipsholder"
+                @click="removeSingleClipboardEvent(ev.id)"
+              >
+                <X class="w-3 h-3" />
+              </button>
+            </div>
           </div>
-          <div v-if="store.clipboard.events.length > 3" class="text-[11px] text-slate-400">
-            + {{ store.clipboard.events.length - 3 }} flere valgt
+
+          <!-- Direkte Indsæt-knap i Udklipsholder-boksen -->
+          <div class="pt-1.5 border-t border-slate-800/90 space-y-1.5">
+            <div class="flex items-center justify-between text-[11px]">
+              <span class="text-slate-400">Valgt mål-dato:</span>
+              <strong class="text-blue-400 font-semibold">{{ store.selectedDateStr.slice(0, 10) }}</strong>
+            </div>
+            <button
+              type="button"
+              class="w-full py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow transition"
+              @click="store.pasteToDate()"
+            >
+              <ClipboardPaste class="w-3.5 h-3.5" />
+              Indsæt her (Ctrl+V)
+            </button>
           </div>
-          <p class="text-[11px] text-emerald-400/90 pt-1">
-            Valgt mål-dato: <strong class="font-semibold">{{ store.selectedDateStr }}</strong>
-            — Tryk <kbd class="px-1 py-0.5 bg-slate-800 rounded text-[10px]">Ctrl+V</kbd> for at indsætte.
-          </p>
         </div>
+
+        <!-- Hvis udklipsholderen er tom, men brugeren har klikket på en aftale -->
+        <div v-else-if="selectedEventsList.length > 0" class="space-y-2">
+          <div class="text-[11px] text-blue-300 font-medium">
+            Markeret nu ({{ selectedEventsList.length }}):
+          </div>
+          <div
+            v-for="selEv in selectedEventsList.slice(0, 3)"
+            :key="selEv.id"
+            class="p-2 rounded-lg bg-slate-900 border border-blue-500/40 text-xs"
+          >
+            <div class="font-semibold text-slate-100 truncate">{{ selEv.title }}</div>
+            <div class="text-[10px] text-slate-400 mt-0.5">{{ formatEventTimeSpan(selEv) }}</div>
+          </div>
+          <button
+            type="button"
+            class="w-full py-1.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+            @click="store.copyOrCutSelection('COPY')"
+          >
+            <Copy class="w-3.5 h-3.5" />
+            Kopiér til udklipsholder (Ctrl+C)
+          </button>
+        </div>
+
+        <!-- Helt tom tilstand -->
         <p v-else class="text-[11px] text-slate-400 leading-relaxed">
           Markér en begivenhed eller dag og tryk <kbd class="px-1 py-0.5 bg-slate-800 rounded text-[10px] text-slate-200">Ctrl+C</kbd>, klik på en ny dag og tryk <kbd class="px-1 py-0.5 bg-slate-800 rounded text-[10px] text-slate-200">Ctrl+V</kbd>.
         </p>
