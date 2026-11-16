@@ -149,51 +149,70 @@ export async function fetchAllEvents(
 }
 
 /**
+ * Direkte, status-tjekket DAV-request mod Mailcow/SOGo.
+ * tsdav kaster IKKE fejl ved HTTP 4xx/5xx på skrive-operationer, så vi laver selv
+ * PUT/DELETE/MKCALENDAR og kaster en tydelig fejl, hvis serveren afviser.
+ */
+async function davRequest(
+  creds: CalDavCredentials,
+  method: string,
+  url: string,
+  body?: string,
+  extraHeaders: Record<string, string> = {}
+): Promise<Response> {
+  const auth = Buffer.from(`${creds.username}:${creds.password}`, 'utf8').toString('base64');
+  const res = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Basic ${auth}`,
+      ...extraHeaders
+    },
+    body
+  });
+
+  if (!res.ok) {
+    const text = (await res.text().catch(() => '')).slice(0, 300);
+    throw new Error(`CalDAV ${method} fejlede (HTTP ${res.status} ${res.statusText})${text ? `: ${text}` : ''}`);
+  }
+  return res;
+}
+
+function ensureTrailingSlash(url: string): string {
+  return url.endsWith('/') ? url : `${url}/`;
+}
+
+/**
  * Opretter eller opdaterer et VEVENT på Mailcow/SOGo via CalDAV PUT.
  */
 export async function saveCalDavEvent(
   creds: CalDavCredentials,
   eventDto: CalendarEventDTO
 ): Promise<CalendarEventDTO> {
-  const { client } = await connectCalDav(creds);
   const uid = eventDto.uid || crypto.randomUUID();
   const icsString = buildIcsFromEvent({ ...eventDto, uid });
-  const filename = `${uid}.ics`;
+  const isUpdate = Boolean(eventDto.caldavUrl);
+  const objectUrl = isUpdate
+    ? (eventDto.caldavUrl as string)
+    : `${ensureTrailingSlash(eventDto.calendarId)}${encodeURIComponent(uid)}.ics`;
 
-  if (eventDto.caldavUrl) {
-    await client.updateCalendarObject({
-      calendarObject: {
-        url: eventDto.caldavUrl,
-        data: icsString,
-        etag: eventDto.etag
-      }
-    });
-    return {
-      ...eventDto,
-      uid,
-      id: `${eventDto.calendarId}::${uid}`,
-      rawIcs: icsString
-    };
-  } else {
-    const calendarUrl = eventDto.calendarId.endsWith('/')
-      ? eventDto.calendarId
-      : `${eventDto.calendarId}/`;
-    const objectUrl = `${calendarUrl}${filename}`;
-
-    await client.createCalendarObject({
-      calendar: { url: eventDto.calendarId } as DAVCalendar,
-      filename,
-      iCalString: icsString
-    });
-
-    return {
-      ...eventDto,
-      uid,
-      id: `${eventDto.calendarId}::${uid}`,
-      caldavUrl: objectUrl,
-      rawIcs: icsString
-    };
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/calendar; charset=utf-8'
+  };
+  if (!isUpdate) {
+    headers['If-None-Match'] = '*';
   }
+
+  const res = await davRequest(creds, 'PUT', objectUrl, icsString, headers);
+  const newEtag = res.headers.get('etag') || undefined;
+
+  return {
+    ...eventDto,
+    uid,
+    id: `${eventDto.calendarId}::${uid}`,
+    caldavUrl: objectUrl,
+    etag: newEtag,
+    rawIcs: icsString
+  };
 }
 
 /**
@@ -202,15 +221,91 @@ export async function saveCalDavEvent(
 export async function deleteCalDavEvent(
   creds: CalDavCredentials,
   caldavUrl: string,
-  etag?: string
+  _etag?: string
 ): Promise<void> {
-  const { client } = await connectCalDav(creds);
-  await client.deleteCalendarObject({
-    calendarObject: {
-      url: caldavUrl,
-      etag
+  try {
+    await davRequest(creds, 'DELETE', caldavUrl);
+  } catch (err: any) {
+    // 404 = allerede slettet på serveren -> betragtes som succes
+    if (String(err?.message || '').includes('HTTP 404')) return;
+    throw err;
+  }
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * Finder brugerens kalender-hjemmemappe (f.eks. https://mail.x.dk/SOGo/dav/<bruger>/Calendar/).
+ */
+async function resolveCalendarHome(creds: CalDavCredentials): Promise<string> {
+  try {
+    const { client } = await connectCalDav(creds);
+    const homeUrl = (client as any)?.account?.homeUrl as string | undefined;
+    if (homeUrl) {
+      return ensureTrailingSlash(new URL(homeUrl, normalizeMailcowUrl(creds.serverUrl)).toString());
     }
+  } catch {
+    // fallback nedenfor
+  }
+  const base = normalizeMailcowUrl(creds.serverUrl);
+  return `${base}${encodeURIComponent(creds.username)}/Calendar/`;
+}
+
+/**
+ * Opretter en ny kalender på Mailcow/SOGo via CalDAV MKCALENDAR.
+ */
+export async function createCalDavCalendar(
+  creds: CalDavCredentials,
+  name: string,
+  color: string
+): Promise<CalendarInfoDTO> {
+  const home = await resolveCalendarHome(creds);
+  const slug = crypto.randomUUID().toUpperCase();
+  const calendarUrl = `${home}${slug}/`;
+  const safeColor = /^#[0-9a-fA-F]{6}$/.test(color) ? color : FALLBACK_COLORS[0];
+
+  const body = `<?xml version="1.0" encoding="utf-8"?>
+<C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:A="http://apple.com/ns/ical/">
+  <D:set>
+    <D:prop>
+      <D:displayname>${escapeXml(name)}</D:displayname>
+      <A:calendar-color>${safeColor}FF</A:calendar-color>
+      <C:supported-calendar-component-set>
+        <C:comp name="VEVENT"/>
+      </C:supported-calendar-component-set>
+    </D:prop>
+  </D:set>
+</C:mkcalendar>`;
+
+  await davRequest(creds, 'MKCALENDAR', calendarUrl, body, {
+    'Content-Type': 'application/xml; charset=utf-8'
   });
+
+  return {
+    id: calendarUrl,
+    url: calendarUrl,
+    name,
+    color: safeColor,
+    serverColor: safeColor,
+    readOnly: false,
+    isShared: false
+  };
+}
+
+/**
+ * Sletter en (egen) kalender og alle dens begivenheder på Mailcow/SOGo.
+ */
+export async function deleteCalDavCalendar(
+  creds: CalDavCredentials,
+  calendarUrl: string
+): Promise<void> {
+  await davRequest(creds, 'DELETE', ensureTrailingSlash(calendarUrl));
 }
 
 /**

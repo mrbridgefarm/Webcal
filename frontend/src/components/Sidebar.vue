@@ -11,7 +11,9 @@ import {
   ClipboardPaste,
   Copy,
   X,
-  Clock
+  Clock,
+  Plus,
+  EyeOff
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../stores/calendarStore';
 import { requestNotificationPermission } from '../services/notifications';
@@ -89,10 +91,60 @@ function removeSingleClipboardEvent(evId: string) {
           <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">
             SOGo Kalendere
           </h2>
-          <span class="text-[11px] text-slate-500">
-            {{ store.calendars.length }} aktive
-          </span>
+          <div class="flex items-center gap-2">
+            <span class="text-[11px] text-slate-500">
+              {{ store.calendars.length }} aktive
+            </span>
+            <button
+              type="button"
+              class="p-1 rounded-md bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white border border-slate-700 transition"
+              title="Tilføj ny kalender"
+              @click="showNewCalendarForm = !showNewCalendarForm"
+            >
+              <Plus class="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
+
+        <!-- Formular: Ny kalender -->
+        <form
+          v-if="showNewCalendarForm"
+          class="mb-2.5 p-2.5 rounded-xl bg-slate-950 border border-blue-500/40 space-y-2"
+          @submit.prevent="submitNewCalendar"
+        >
+          <div class="text-[11px] font-semibold text-slate-200">Ny kalender</div>
+          <div class="flex items-center gap-2">
+            <input
+              v-model="newCalendarName"
+              type="text"
+              required
+              placeholder="Kalendernavn..."
+              class="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500"
+            />
+            <input
+              v-model="newCalendarColor"
+              type="color"
+              class="w-8 h-8 rounded-lg bg-transparent border border-slate-700 cursor-pointer shrink-0"
+              title="Vælg farve"
+            />
+          </div>
+          <div class="flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              class="px-2.5 py-1 rounded-lg text-[11px] text-slate-300 hover:bg-slate-800"
+              @click="showNewCalendarForm = false"
+            >
+              Annullér
+            </button>
+            <button
+              type="submit"
+              :disabled="isCreatingCalendar"
+              class="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
+            >
+              {{ isCreatingCalendar ? 'Opretter...' : 'Opret kalender' }}
+            </button>
+          </div>
+        </form>
 
         <div class="space-y-1.5">
           <div
@@ -130,8 +182,26 @@ function removeSingleClipboardEvent(evId: string) {
               </div>
             </label>
 
-            <!-- Farvevælger + Gendan SOGo serverfarve -->
+            <!-- Farvevælger + Gendan SOGo serverfarve + Slet/Fjern -->
             <div class="flex items-center gap-1 shrink-0">
+              <button
+                v-if="!cal.readOnly && !cal.isShared"
+                type="button"
+                class="p-1 rounded hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                title="Slet kalender (inkl. alle begivenheder)"
+                @click="confirmDeleteCalendar(cal.id, cal.name)"
+              >
+                <Trash2 class="w-3 h-3" />
+              </button>
+              <button
+                v-else
+                type="button"
+                class="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-slate-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                title="Fjern delt kalender fra listen"
+                @click="store.hideCalendar(cal.id)"
+              >
+                <EyeOff class="w-3 h-3" />
+              </button>
               <button
                 v-if="cal.localColorOverride && cal.localColorOverride !== cal.serverColor"
                 type="button"

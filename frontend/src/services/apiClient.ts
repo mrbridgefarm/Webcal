@@ -133,3 +133,46 @@ export async function apiUpdateRsvp(
   }
   return data.event;
 }
+
+export async function apiCreateCalendar(
+  session: AuthSession,
+  name: string,
+  color: string
+): Promise<Omit<CalendarSource, 'visible'>> {
+  const res = await fetch('/api/caldav/calendars', {
+    method: 'POST',
+    headers: buildAuthHeaders(session),
+    body: JSON.stringify({
+      serverUrl: session.serverUrl,
+      username: session.username,
+      password: session.password,
+      name,
+      color
+    })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke oprette kalenderen på serveren.');
+  }
+  return data.calendar;
+}
+
+export async function apiDeleteCalendar(
+  session: AuthSession,
+  calendarUrl: string
+): Promise<void> {
+  const res = await fetch('/api/caldav/calendars', {
+    method: 'DELETE',
+    headers: buildAuthHeaders(session),
+    body: JSON.stringify({
+      serverUrl: session.serverUrl,
+      username: session.username,
+      password: session.password,
+      calendarUrl
+    })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke slette kalenderen på serveren.');
+  }
+}

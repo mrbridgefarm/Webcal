@@ -6,7 +6,9 @@ import {
   saveCalDavEvent,
   deleteCalDavEvent,
   updateEventRsvp,
-  normalizeMailcowUrl
+  normalizeMailcowUrl,
+  createCalDavCalendar,
+  deleteCalDavCalendar
 } from '../services/davClient.js';
 import { CalendarEventDTO, AttendeeDTO } from '../services/icalMapper.js';
 
@@ -131,6 +133,47 @@ caldavRouter.delete('/events', async (req: Request, res: Response) => {
       ok: false,
       error: err?.message || 'Kunne ikke slette begivenheden på CalDAV-serveren.'
     });
+  }
+});
+
+/**
+ * POST /api/caldav/calendars
+ * Opretter en ny kalender på Mailcow/SOGo (MKCALENDAR).
+ */
+caldavRouter.post('/calendars', async (req: Request, res: Response) => {
+  try {
+    const creds = extractCredentials(req);
+    const name = String(req.body?.name || '').trim();
+    const color = String(req.body?.color || '#2563eb');
+    if (!name) {
+      res.status(400).json({ ok: false, error: 'Kalendernavn mangler.' });
+      return;
+    }
+    const calendar = await createCalDavCalendar(creds, name, color);
+    res.json({ ok: true, calendar });
+  } catch (err: any) {
+    console.error('Fejl ved oprettelse af kalender:', err?.message || err);
+    res.status(500).json({ ok: false, error: err?.message || 'Kunne ikke oprette kalenderen.' });
+  }
+});
+
+/**
+ * DELETE /api/caldav/calendars
+ * Sletter en egen kalender på Mailcow/SOGo.
+ */
+caldavRouter.delete('/calendars', async (req: Request, res: Response) => {
+  try {
+    const creds = extractCredentials(req);
+    const calendarUrl = String(req.body?.calendarUrl || '');
+    if (!calendarUrl) {
+      res.status(400).json({ ok: false, error: 'calendarUrl mangler.' });
+      return;
+    }
+    await deleteCalDavCalendar(creds, calendarUrl);
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error('Fejl ved sletning af kalender:', err?.message || err);
+    res.status(500).json({ ok: false, error: err?.message || 'Kunne ikke slette kalenderen.' });
   }
 });
 

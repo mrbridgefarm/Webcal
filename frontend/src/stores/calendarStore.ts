@@ -7,7 +7,9 @@ import {
   apiSyncCalDav,
   apiSaveEvent,
   apiDeleteEvent,
-  apiUpdateRsvp
+  apiUpdateRsvp,
+  apiCreateCalendar,
+  apiDeleteCalendar
 } from '../services/apiClient';
 import { startReminderWatcher } from '../services/notifications';
 import type {
@@ -24,6 +26,16 @@ import type {
 
 const SESSION_STORAGE_KEY = 'dav_sync_cal_session_v1';
 const COLOR_OVERRIDE_KEY = 'dav_sync_cal_color_overrides_v1';
+const HIDDEN_CAL_KEY = 'dav_sync_cal_hidden_calendars_v1';
+
+function loadHiddenCalendarIds(): string[] {
+  try {
+    const raw = localStorage.getItem(HIDDEN_CAL_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
 
 export interface ToastMessage {
   id: string;
@@ -109,6 +121,9 @@ export const useCalendarStore = defineStore('calendar', () => {
   const editingEvent = ref<CalendarEvent | null>(null);
   const isEventModalOpen = ref<boolean>(false);
   const toasts = ref<ToastMessage[]>([]);
+  let isFlushing = false;
+  let flushRequested = false;
+  const hiddenCalendarIds = ref<string[]>(loadHiddenCalendarIds());
 
   // --- Helpers ---
   function notify(
@@ -385,14 +400,36 @@ export const useCalendarStore = defineStore('calendar', () => {
       const res = await apiSyncCalDav(session.value);
 
       const visibilityMap = new Map(calendars.value.map((c) => [c.id, c.visible]));
+      const hiddenSet = new Set(hiddenCalendarIds.value);
       const mergedCalendars: CalendarSource[] = clonePlain(
-        res.calendars.map((c) => ({
-          ...c,
-          visible: visibilityMap.has(c.id) ? Boolean(visibilityMap.get(c.id)) : true
-        }))
+        res.calendars
+          .filter((c) => !hiddenSet.has(c.id))
+          .map((c) => ({
+            ...c,
+            visible: visibilityMap.has(c.id) ? Boolean(visibilityMap.get(c.id)) : true
+          }))
       );
       applyColorOverridesToCalendars(mergedCalendars);
-      const plainEvents = clonePlain(res.events);
+      const serverEvents = clonePlain(res.events).filter((e) => !hiddenSet.has(e.calendarId));
+
+      // Behold lokale ændringer der endnu ikke er nået serveren (så indsatte aftaler ikke forsvinder)
+      const pendingQueue = await db.syncQueue.toArray();
+      const pendingIds = new Set(
+        pendingQueue.filter((q) => q.action !== 'DELETE').map((q) => q.eventId)
+      );
+      const deletedIds = new Set(
+        pendingQueue.filter((q) => q.action === 'DELETE').map((q) => q.eventId)
+      );
+      const serverIds = new Set(serverEvents.map((e) => e.id));
+      const localPending = events.value
+        .filter((e) => pendingIds.has(e.id) && !serverIds.has(e.id))
+        .map((e) => clonePlain(e));
+      const plainEvents = [
+        ...serverEvents
+          .filter((e) => !deletedIds.has(e.id))
+          .map((e) => (pendingIds.has(e.id) ? clonePlain(events.value.find((l) => l.id === e.id) || e) : e)),
+        ...localPending
+      ];
 
       await db.transaction('rw', db.calendars, db.events, async () => {
         await db.calendars.clear();
@@ -439,41 +476,72 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   async function flushSyncQueue() {
     if (!isOnline.value || session.value?.mode !== 'CALDAV') return;
-    const queue = await db.syncQueue.orderBy('id').toArray();
-    if (queue.length === 0) return;
+    if (isFlushing) {
+      flushRequested = true;
+      return;
+    }
+    isFlushing = true;
 
-    for (const item of queue) {
-      try {
-        if (item.action === 'UPSERT' && item.payload.event) {
-          const saved = clonePlain(await apiSaveEvent(session.value, item.payload.event));
-          await db.events.put({ ...saved, pendingSync: false });
-          const idx = events.value.findIndex((e) => e.id === item.eventId || e.id === saved.id);
-          if (idx !== -1) {
-            events.value[idx] = { ...saved, pendingSync: false };
+    try {
+      const queue = await db.syncQueue.orderBy('id').toArray();
+
+      for (const item of queue) {
+        try {
+          if (item.action === 'UPSERT' && item.payload.event) {
+            // Brug altid nyeste lokale version (fx caldavUrl fra en tidligere oprettelse)
+            const latestLocal = events.value.find((e) => e.id === item.eventId);
+            const payloadEvent = clonePlain({
+              ...item.payload.event,
+              caldavUrl: latestLocal?.caldavUrl || item.payload.event.caldavUrl,
+              etag: latestLocal?.etag || item.payload.event.etag
+            });
+            const saved = clonePlain(await apiSaveEvent(session.value, payloadEvent));
+            const savedPlain = { ...saved, pendingSync: false };
+            await db.events.put(savedPlain);
+            const idx = events.value.findIndex((e) => e.id === item.eventId || e.id === saved.id);
+            if (idx !== -1) {
+              events.value[idx] = savedPlain;
+            }
+          } else if (item.action === 'DELETE' && item.payload.caldavUrl) {
+            await apiDeleteEvent(session.value, item.payload.caldavUrl, item.payload.etag);
+          } else if (item.action === 'RSVP' && item.payload.event && item.payload.partstat) {
+            const updated = clonePlain(
+              await apiUpdateRsvp(session.value, item.payload.event, item.payload.partstat)
+            );
+            await db.events.put({ ...updated, pendingSync: false });
+            const idx = events.value.findIndex((e) => e.id === updated.id);
+            if (idx !== -1) {
+              events.value[idx] = { ...updated, pendingSync: false };
+            }
           }
-        } else if (item.action === 'DELETE' && item.payload.caldavUrl) {
-          await apiDeleteEvent(session.value, item.payload.caldavUrl, item.payload.etag);
-        } else if (item.action === 'RSVP' && item.payload.event && item.payload.partstat) {
-          const updated = clonePlain(
-            await apiUpdateRsvp(session.value, item.payload.event, item.payload.partstat)
-          );
-          await db.events.put({ ...updated, pendingSync: false });
-          const idx = events.value.findIndex((e) => e.id === updated.id);
-          if (idx !== -1) {
-            events.value[idx] = { ...updated, pendingSync: false };
+
+          if (item.id !== undefined) {
+            await db.syncQueue.delete(item.id);
+          }
+        } catch (err: any) {
+          console.warn('Synkronisering af ændring fejlede:', err);
+          const msg = String(err?.message || err);
+          // Netværksfejl -> prøv igen senere. Serverafvisning -> vis fejl og drop elementet, så køen ikke låser.
+          const isNetworkError = err instanceof TypeError || /Failed to fetch|NetworkError/i.test(msg);
+          if (isNetworkError) {
+            notify('Ændring venter på forbindelse', 'Gemmes lokalt og sendes til Mailcow, når serveren kan nås.', 'warning');
+            break;
+          }
+          notify('Mailcow afviste ændringen', msg, 'error', 9000);
+          if (item.id !== undefined) {
+            await db.syncQueue.delete(item.id);
           }
         }
+      }
 
-        if (item.id !== undefined) {
-          await db.syncQueue.delete(item.id);
-        }
-      } catch (err) {
-        console.warn('Offline kø-element fejlede og prøves igen senere:', err);
-        break;
+      syncQueue.value = await db.syncQueue.toArray();
+    } finally {
+      isFlushing = false;
+      if (flushRequested) {
+        flushRequested = false;
+        void flushSyncQueue();
       }
     }
-
-    syncQueue.value = await db.syncQueue.toArray();
   }
 
   // --- Kalender-synlighed & Farvestyring ---
@@ -961,6 +1029,104 @@ export const useCalendarStore = defineStore('calendar', () => {
     notify('RSVP opdateret', `Dit svar på "${ev.title}" er sat til: ${labelMap[partstat]}.`, 'success');
   }
 
+  // --- Kalender-administration (Tilføj / Slet / Fjern fra listen) ---
+  function persistHiddenCalendars() {
+    localStorage.setItem(HIDDEN_CAL_KEY, JSON.stringify(hiddenCalendarIds.value));
+  }
+
+  async function createCalendar(name: string, color: string) {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      notify('Navn mangler', 'Giv kalenderen et navn.', 'warning');
+      return null;
+    }
+
+    let newCal: CalendarSource;
+    if (session.value?.mode === 'CALDAV') {
+      if (!isOnline.value) {
+        notify('Offline', 'Du skal være online for at oprette en kalender på Mailcow.', 'warning');
+        return null;
+      }
+      try {
+        const created = await apiCreateCalendar(session.value, trimmed, color);
+        newCal = clonePlain({ ...created, visible: true });
+      } catch (err: any) {
+        notify('Kunne ikke oprette kalender', err?.message || String(err), 'error', 9000);
+        return null;
+      }
+    } else {
+      const id = `demo-${generateId()}`;
+      newCal = {
+        id,
+        url: `https://mail.demo.dk/SOGo/dav/carsten/Calendar/${id}/`,
+        name: trimmed,
+        color,
+        serverColor: color,
+        readOnly: false,
+        isShared: false,
+        visible: true
+      };
+    }
+
+    calendars.value.push(newCal);
+    await db.calendars.put(clonePlain(newCal));
+    activeTargetCalendarId.value = newCal.id;
+    notify('Kalender oprettet', `"${trimmed}" er klar og valgt som mål-kalender.`, 'success');
+    return newCal;
+  }
+
+  async function deleteCalendar(calId: string) {
+    const cal = getCalendarById(calId);
+    if (!cal) return;
+    if (cal.readOnly || cal.isShared) {
+      notify('Kan ikke slettes', 'Delte kalendere kan kun fjernes fra listen, ikke slettes.', 'warning');
+      return;
+    }
+
+    if (session.value?.mode === 'CALDAV') {
+      try {
+        await apiDeleteCalendar(session.value, cal.url);
+      } catch (err: any) {
+        notify('Kunne ikke slette kalender', err?.message || String(err), 'error', 9000);
+        return;
+      }
+    }
+
+    await removeCalendarLocally(calId);
+    notify('Kalender slettet', `"${cal.name}" og dens begivenheder er slettet.`, 'info');
+  }
+
+  async function hideCalendar(calId: string) {
+    const cal = getCalendarById(calId);
+    if (!cal) return;
+    if (!hiddenCalendarIds.value.includes(calId)) {
+      hiddenCalendarIds.value.push(calId);
+      persistHiddenCalendars();
+    }
+    await removeCalendarLocally(calId);
+    notify('Kalender fjernet fra listen', `"${cal.name}" vises ikke længere. Kan gendannes under "Skjulte kalendere".`, 'info');
+  }
+
+  async function restoreHiddenCalendars() {
+    hiddenCalendarIds.value = [];
+    persistHiddenCalendars();
+    await syncWithServer(false);
+  }
+
+  async function removeCalendarLocally(calId: string) {
+    calendars.value = calendars.value.filter((c) => c.id !== calId);
+    const evIds = events.value.filter((e) => e.calendarId === calId).map((e) => e.id);
+    events.value = events.value.filter((e) => e.calendarId !== calId);
+    selectedEventIds.value = selectedEventIds.value.filter((id) => !evIds.includes(id));
+    clipboard.value.events = clipboard.value.events.filter((e) => e.calendarId !== calId);
+    if (clipboard.value.events.length === 0) clearClipboard();
+    await db.calendars.delete(calId);
+    await db.events.bulkDelete(evIds);
+    if (activeTargetCalendarId.value === calId) {
+      activeTargetCalendarId.value = writableCalendars.value[0]?.id || '';
+    }
+  }
+
   // --- Kontekstmenu & Modal hjælpere ---
   function openContextMenu(payload: Omit<ContextMenuState, 'visible'>) {
     const menuWidth = 260;
@@ -1086,7 +1252,12 @@ export const useCalendarStore = defineStore('calendar', () => {
     openContextMenu,
     closeContextMenu,
     openCreateEventModal,
-    openEditEventModal
+    openEditEventModal,
+    hiddenCalendarIds,
+    createCalendar,
+    deleteCalendar,
+    hideCalendar,
+    restoreHiddenCalendars
   };
 });
 
