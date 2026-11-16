@@ -40,6 +40,43 @@ function ensureTrailingSlash(url: string): string {
 }
 
 /**
+ * Kanonisk nøgle til deduplikering af kalender-URL'er, så f.eks.
+ * .../mail%40domæne.dk/Calendar/personal/ og .../mail@domæne.dk/Calendar/personal/
+ * altid behandles som den nøjagtigt samme kalender.
+ */
+function canonicalCalendarKey(rawUrl: string): string {
+  try {
+    const u = new URL(ensureTrailingSlash(rawUrl.trim()));
+    const decodedPath = u.pathname
+      .split('/')
+      .map((seg) => {
+        try {
+          return decodeURIComponent(seg);
+        } catch {
+          return seg;
+        }
+      })
+      .join('/');
+    return `${u.origin.toLowerCase()}${decodedPath.toLowerCase()}`;
+  } catch {
+    return rawUrl.trim().toLowerCase();
+  }
+}
+
+/**
+ * Returnerer true hvis URL'en er en intern WebDAV/SOGo system-kollektion
+ * (f.eks. calendar-proxy-read, calendar-proxy-write, inbox, outbox, freebusy),
+ * som IKKE er en rigtig bruger-kalender.
+ */
+function isInternalNonCalendarUrl(rawUrl: string): boolean {
+  const decoded = decodeURIComponent(rawUrl);
+  return (
+    /\/Calendar\/$/i.test(decoded) ||
+    /\/(?:calendar-proxy-read|calendar-proxy-write|inbox|outbox|freebusy|notifications|trash)(?:\/|$)/i.test(decoded)
+  );
+}
+
+/**
  * Udtrækker en specifik kalender-URL, hvis brugeren har indsat et direkte link
  * som f.eks. https://post2ko.bridgefarm.dk/SOGo/dav/mail@bridgefarm.dk/Calendar/personal/
  */
@@ -199,12 +236,19 @@ async function fetchCalendarsDirectPropfind(
     const rawHref = hrefMatch[1].trim();
     const fullUrl = ensureTrailingSlash(new URL(rawHref, baseOrigin).toString());
 
-    // Tjek at det er en kalender-kollektion (og ikke inbox/outbox eller selve rod-mappen /Calendar/)
-    const isCalendarResource = /<(?:[a-zA-Z0-9]+:)?calendar\b/i.test(block);
-    const isScheduleBox = /schedule-inbox|schedule-outbox/i.test(block);
-    const isRootCalendarFolder = /\/Calendar\/$/i.test(decodeURIComponent(fullUrl));
+    if (isInternalNonCalendarUrl(fullUrl)) {
+      continue;
+    }
 
-    if (!isCalendarResource || isScheduleBox || isRootCalendarFolder) {
+    // Udtræk kun <resourcetype>...</resourcetype> blokken, så vi ikke matcher <calendar-color> eller <calendar-description>
+    const resourceTypeMatch = block.match(/<(?:[a-zA-Z0-9]+:)?resourcetype[^>]*>([\s\S]*?)<\/(?:[a-zA-Z0-9]+:)?resourcetype>/i);
+    const resourceTypeXml = resourceTypeMatch ? resourceTypeMatch[1] : '';
+
+    // Skal have et <calendar/> eller <C:calendar/> tag (IKKE efterfulgt af bindestreg som i calendar-proxy-read)
+    const isCalendarResource = /<(?:[a-zA-Z0-9]+:)?calendar(?:\s|>|\/)/i.test(resourceTypeXml);
+    const isScheduleOrProxy = /schedule-inbox|schedule-outbox|calendar-proxy|vevent-collection-only-false/i.test(resourceTypeXml);
+
+    if (!isCalendarResource || isScheduleOrProxy) {
       continue;
     }
 
@@ -252,7 +296,7 @@ async function fetchCalendarsDirectPropfind(
 export async function fetchCalendars(creds: CalDavCredentials): Promise<CalendarInfoDTO[]> {
   const normalizedUser = creds.username.toLowerCase().trim();
   const directCalUrl = extractDirectCalendarUrl(creds.serverUrl);
-  const discoveredByUrl = new Map<string, CalendarInfoDTO>();
+  const discoveredByKey = new Map<string, CalendarInfoDTO>();
 
   // 1. Prøv tsdav standard discovery mod /SOGo/dav/
   try {
@@ -262,23 +306,27 @@ export async function fetchCalendars(creds: CalDavCredentials): Promise<Calendar
     for (let idx = 0; idx < davCalendars.length; idx++) {
       const cal = davCalendars[idx];
       const comps = Array.isArray(cal.components) ? cal.components : [];
-      // VIGTIGT: Kun filtrér fra hvis components IKKE er tom og ikke indeholder VEVENT!
       if (comps.length > 0 && !comps.some((c) => String(c).toUpperCase() === 'VEVENT')) {
         continue;
       }
 
       const fullUrl = ensureTrailingSlash(cal.url);
-      if (/\/Calendar\/$/i.test(decodeURIComponent(fullUrl))) {
+      if (isInternalNonCalendarUrl(fullUrl)) {
+        continue;
+      }
+
+      const key = canonicalCalendarKey(fullUrl);
+      if (discoveredByKey.has(key)) {
         continue;
       }
 
       const rawColor =
         extractHexColor((cal as any).calendarColor) ||
-        FALLBACK_COLORS[discoveredByUrl.size % FALLBACK_COLORS.length];
+        FALLBACK_COLORS[discoveredByKey.size % FALLBACK_COLORS.length];
       const displayName =
         typeof cal.displayName === 'string' && cal.displayName.trim()
           ? normalizeDanishText(cal.displayName.trim())
-          : `Kalender ${discoveredByUrl.size + 1}`;
+          : `Kalender ${discoveredByKey.size + 1}`;
 
       const { isShared, readOnly, owner } = detectCalendarPermissionsFromUrlAndName(
         fullUrl,
@@ -286,7 +334,7 @@ export async function fetchCalendars(creds: CalDavCredentials): Promise<Calendar
         normalizedUser
       );
 
-      discoveredByUrl.set(fullUrl, {
+      discoveredByKey.set(key, {
         id: fullUrl,
         url: fullUrl,
         name: displayName,
@@ -303,25 +351,31 @@ export async function fetchCalendars(creds: CalDavCredentials): Promise<Calendar
     console.warn('tsdav discovery fejlede, bruger direkte SOGo PROPFIND fallback:', err);
   }
 
-  // 2. Direkte PROPFIND mod brugerens SOGo /Calendar/ mappe (sikrer at alle SOGo kalendere findes)
-  try {
-    const homeUrl = buildSogoUserCalendarHomeUrl(creds.serverUrl, creds.username);
-    const directHomeCals = await fetchCalendarsDirectPropfind(creds, homeUrl, '1');
-    for (const cal of directHomeCals) {
-      if (!discoveredByUrl.has(cal.url)) {
-        discoveredByUrl.set(cal.url, cal);
+  // 2. Kun hvis tsdav ikke fandt nogen kalendere, bruger vi direkte PROPFIND mod brugerens SOGo /Calendar/ mappe
+  if (discoveredByKey.size === 0) {
+    try {
+      const homeUrl = buildSogoUserCalendarHomeUrl(creds.serverUrl, creds.username);
+      const directHomeCals = await fetchCalendarsDirectPropfind(creds, homeUrl, '1');
+      for (const cal of directHomeCals) {
+        const key = canonicalCalendarKey(cal.url);
+        if (!discoveredByKey.has(key)) {
+          discoveredByKey.set(key, cal);
+        }
       }
+    } catch (err) {
+      console.warn('Direkte PROPFIND mod SOGo homeUrl fejlede:', err);
     }
-  } catch (err) {
-    console.warn('Direkte PROPFIND mod SOGo homeUrl fejlede:', err);
   }
 
-  // 3. Hvis brugeren indtastede et direkte link (f.eks. .../Calendar/personal/), hent også den direkte
-  if (directCalUrl && !discoveredByUrl.has(directCalUrl)) {
+  // 3. Hvis brugeren indtastede et direkte link (f.eks. .../Calendar/personal/), sikre at den er med
+  if (directCalUrl && !discoveredByKey.has(canonicalCalendarKey(directCalUrl))) {
     try {
       const directCals = await fetchCalendarsDirectPropfind(creds, directCalUrl, '0');
       for (const cal of directCals) {
-        discoveredByUrl.set(cal.url, cal);
+        const key = canonicalCalendarKey(cal.url);
+        if (!discoveredByKey.has(key)) {
+          discoveredByKey.set(key, cal);
+        }
       }
     } catch (err) {
       console.warn('Direkte PROPFIND mod specifik kalender-URL fejlede:', err);
@@ -329,12 +383,11 @@ export async function fetchCalendars(creds: CalDavCredentials): Promise<Calendar
   }
 
   // 4. Sidste fallback: Hvis listen stadig er tom, men auth virkede, tilføj standard SOGo personal-kalender
-  if (discoveredByUrl.size === 0) {
+  if (discoveredByKey.size === 0) {
     const fallbackUrl =
       directCalUrl || `${buildSogoUserCalendarHomeUrl(creds.serverUrl, creds.username)}personal/`;
-    // Verificér at brugeren har adgang med en hurtig PROPFIND
     await davRequest(creds, 'PROPFIND', fallbackUrl, undefined, { Depth: '0' });
-    discoveredByUrl.set(fallbackUrl, {
+    discoveredByKey.set(canonicalCalendarKey(fallbackUrl), {
       id: fallbackUrl,
       url: fallbackUrl,
       name: 'Personlig Kalender (SOGo)',
@@ -345,7 +398,7 @@ export async function fetchCalendars(creds: CalDavCredentials): Promise<Calendar
     });
   }
 
-  return Array.from(discoveredByUrl.values());
+  return Array.from(discoveredByKey.values());
 }
 
 /**

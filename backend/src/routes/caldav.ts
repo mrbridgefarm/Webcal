@@ -311,10 +311,16 @@ caldavRouter.get('/public/:token', async (req: Request, res: Response) => {
 
     const { record, creds } = resolved;
     const allCalendars = await fetchCalendars(creds);
-    const allowedSet = new Set(record.calendarUrls);
+    const allowedSet = new Set(
+      record.calendarUrls.map((u) => decodeURIComponent(u).toLowerCase().replace(/\/+$/, ''))
+    );
 
     const sharedCalendars = allCalendars
-      .filter((c) => allowedSet.has(c.url) || allowedSet.has(c.id))
+      .filter((c) => {
+        const normUrl = decodeURIComponent(c.url).toLowerCase().replace(/\/+$/, '');
+        const normId = decodeURIComponent(c.id).toLowerCase().replace(/\/+$/, '');
+        return allowedSet.has(normUrl) || allowedSet.has(normId);
+      })
       .map((c) => ({
         ...c,
         readOnly: true,
