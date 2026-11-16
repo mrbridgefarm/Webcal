@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
     container_name: dav-sync-cal
     restart: unless-stopped
+    expose:
+      - "3000"
     ports:
       - "${PORT:-3000}:3000"
     environment:
@@ -12,9 +14,16 @@ services:
       - PORT=3000
       - DEFAULT_CALDAV_URL=${DEFAULT_CALDAV_URL:-}
       - ALLOW_INSECURE_TLS=${ALLOW_INSECURE_TLS:-false}
+    networks:
+      - pangolin
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+networks:
+  pangolin:
+    name: pangolin
+    external: true

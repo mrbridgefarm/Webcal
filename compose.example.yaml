@@ -1,0 +1,49 @@
+# ==============================================================================
+# Eksempel på Docker Compose (compose.yaml) med "pangolin" netværk
+# Kopiér evt. til compose.yaml: cp compose.example.yaml compose.yaml
+#
+# Bemærk: Hvis netværket "pangolin" ikke findes endnu på din VM, kan det oprettes med:
+#   docker network create pangolin
+# ==============================================================================
+
+services:
+  dav-sync-cal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Alternativt, hvis du henter det færdigbyggede multi-arch image fra GitHub (GHCR):
+    # image: ghcr.io/<dit-github-brugernavn>/webcal:latest
+    container_name: dav-sync-cal
+    restart: unless-stopped
+
+    # Eksponerer port 3000 internt på "pangolin"-netværket
+    # (I Pangolin / Reverse Proxy kan du pege direkte på: http://dav-sync-cal:3000)
+    expose:
+      - "3000"
+
+    # Valgfrit: Åbn også porten direkte på VM'ens host-IP (kan udkommenteres, hvis al trafik går gennem Pangolin)
+    ports:
+      - "${PORT:-3000}:3000"
+
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      # Valgfri standard Mailcow/SOGo CalDAV URL:
+      - DEFAULT_CALDAV_URL=${DEFAULT_CALDAV_URL:-https://mail.ditdomæne.dk/SOGo/dav/}
+      # Sæt til true hvis Mailcow kører med selv-signeret certifikat internt:
+      - ALLOW_INSECURE_TLS=${ALLOW_INSECURE_TLS:-false}
+
+    networks:
+      - pangolin
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  pangolin:
+    name: pangolin
+    external: true

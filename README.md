@@ -35,11 +35,14 @@ cd <dit-repo>
 # Valgfrit: Kopiér .env.example til .env og tilpas port / standard Mailcow URL
 cp .env.example .env
 
-# Byg og start containeren i baggrunden
+# Sørg for at dit "pangolin" Docker-netværk findes (hvis Pangolin ikke allerede har oprettet det):
+docker network inspect pangolin >/dev/null 2>&1 || docker network create pangolin
+
+# Byg og start containeren i baggrunden (bruger compose.yaml)
 docker compose up -d --build
 ```
 
-Åbn derefter **`http://<din-vm-ip>:3000`** i din browser.
+I **Pangolin** kan du nu oprette en ressource, der peger direkte på container-navnet **`http://dav-sync-cal:3000`** på `pangolin`-netværket (eller tilgå den via `http://<din-vm-ip>:3000`). Se også [`compose.example.yaml`](compose.example.yaml) for flere detaljer.
 
 ### Metode 2: Multi-Arch Image via GitHub Actions (`ghcr.io`)
 
