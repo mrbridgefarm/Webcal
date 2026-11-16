@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import TopBar from './components/TopBar.vue';
 import Sidebar from './components/Sidebar.vue';
 import CalendarGrid from './components/CalendarGrid.vue';
@@ -21,9 +21,55 @@ import {
   Lock
 } from 'lucide-vue-next';
 
+const SIDEBAR_WIDTH_KEY = 'dav_sync_cal_sidebar_width_v1';
+const SIDEBAR_COLLAPSED_KEY = 'dav_sync_cal_sidebar_collapsed_v1';
+
 const store = useCalendarStore();
 const calendarGridRef = ref<InstanceType<typeof CalendarGrid> | null>(null);
 const currentTitle = ref('');
+
+// Sidebar bredde & kollaps-tilstand (gemmes i localStorage)
+const sidebarCollapsed = ref<boolean>(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true');
+const sidebarWidth = ref<number>(
+  Math.min(420, Math.max(180, Number(localStorage.getItem(SIDEBAR_WIDTH_KEY)) || 260))
+);
+const isResizingSidebar = ref<boolean>(false);
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value;
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed.value));
+  void nextTick(() => {
+    window.setTimeout(() => calendarGridRef.value?.updateSize(), 50);
+  });
+}
+
+function startResizeSidebar(e: MouseEvent) {
+  e.preventDefault();
+  isResizingSidebar.value = true;
+
+  const onMouseMove = (moveEvent: MouseEvent) => {
+    const newWidth = Math.min(420, Math.max(180, moveEvent.clientX));
+    sidebarWidth.value = newWidth;
+    calendarGridRef.value?.updateSize();
+  };
+
+  const onMouseUp = () => {
+    isResizingSidebar.value = false;
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value));
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('mouseup', onMouseUp);
+    calendarGridRef.value?.updateSize();
+  };
+
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
+}
+
+function resetSidebarWidth() {
+  sidebarWidth.value = 260;
+  localStorage.setItem(SIDEBAR_WIDTH_KEY, '260');
+  void nextTick(() => calendarGridRef.value?.updateSize());
+}
 
 function isTypingInInput(target: EventTarget | null): boolean {
   if (!target || !(target instanceof HTMLElement)) return false;
@@ -92,7 +138,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-screen w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden">
+  <div
+    class="h-screen w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden"
+    :class="{ 'cursor-col-resize select-none': isResizingSidebar }"
+  >
     <!-- Hvis et offentligt delingslink er ugyldigt eller tilbagekaldt -->
     <div
       v-if="store.publicShareError"
@@ -113,15 +162,29 @@ onUnmounted(() => {
     <template v-else-if="store.isAuthenticated">
       <TopBar
         :title-text="currentTitle"
+        :sidebar-collapsed="sidebarCollapsed"
         @prev="calendarGridRef?.goPrev()"
         @next="calendarGridRef?.goNext()"
         @today="calendarGridRef?.goToday()"
         @change-view="(v) => calendarGridRef?.changeView(v)"
         @jump-to-date="(d) => calendarGridRef?.jumpToDate(d)"
+        @toggle-sidebar="toggleSidebar"
       />
 
-      <div class="flex-1 flex min-h-0 overflow-hidden">
-        <Sidebar />
+      <div class="flex-1 flex min-h-0 overflow-hidden relative">
+        <!-- Sidepanel + Træk-kant til breddejustering -->
+        <template v-if="!sidebarCollapsed">
+          <Sidebar :width="sidebarWidth" />
+          <div
+            class="w-1.5 bg-slate-800/80 hover:bg-blue-500 active:bg-blue-400 cursor-col-resize transition-colors shrink-0 relative group"
+            title="Træk for at tilpasse sidepanelets bredde (dobbeltklik for standardbredde)"
+            @mousedown="startResizeSidebar"
+            @dblclick="resetSidebarWidth"
+          >
+            <div class="absolute inset-y-0 -left-1 -right-1"></div>
+          </div>
+        </template>
+
         <CalendarGrid
           ref="calendarGridRef"
           @title-change="(t) => (currentTitle = t)"

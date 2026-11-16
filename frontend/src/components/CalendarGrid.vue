@@ -335,12 +335,20 @@ onMounted(() => {
   void nextTick(updateSelectedDayHighlight);
 });
 
+function updateSize() {
+  const api = calendarRef.value?.getApi();
+  if (api) {
+    api.updateSize();
+  }
+}
+
 defineExpose({
   goPrev,
   goNext,
   goToday,
   changeView,
-  jumpToDate
+  jumpToDate,
+  updateSize
 });
 </script>
 

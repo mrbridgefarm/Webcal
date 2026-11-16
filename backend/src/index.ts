@@ -36,6 +36,22 @@ app.use('/api/caldav', caldavRouter);
 // I produktion (Docker) serves den byggede Vue 3 PWA fra /app/public
 const publicDir = path.resolve(__dirname, '../public');
 if (fs.existsSync(publicDir)) {
+  // Undgå at browseren cacher index.html eller Service Worker ved opdateringer
+  app.use((req, res, next) => {
+    if (
+      req.path === '/' ||
+      req.path === '/index.html' ||
+      req.path === '/sw.js' ||
+      req.path === '/registerSW.js' ||
+      req.path === '/manifest.webmanifest'
+    ) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+    next();
+  });
+
   app.use(express.static(publicDir));
 
   // SPA fallback for alle ikke-API ruter
@@ -44,6 +60,7 @@ if (fs.existsSync(publicDir)) {
       next();
       return;
     }
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.sendFile(path.join(publicDir, 'index.html'));
   });
 }

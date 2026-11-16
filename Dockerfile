@@ -1,12 +1,13 @@
 # ==============================================================================
-# Multi-Arch Dockerfile (linux/amd64 & linux/arm64) for DAV-Sync Cal
-# Bygger både Vue 3 PWA Frontend og Node.js/Express CalDAV Proxy Backend
+# Hurtig Multi-Arch Dockerfile (linux/amd64 & linux/arm64) for DAV-Sync Cal
+# Bruger --platform=$BUILDPLATFORM i build-stages, så Vite og TypeScript
+# ikke skal emuleres i langsom QEMU på GitHub Actions (bygger på < 1 minut!)
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# Stage 1: Build Frontend (Vue 3 + TypeScript + Vite + PWA)
+# Stage 1: Build Frontend (Nativt på build-serveren)
 # ------------------------------------------------------------------------------
-FROM node:22-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 COPY frontend/package.json ./
@@ -16,19 +17,19 @@ COPY frontend/ ./
 RUN npm run build
 
 # ------------------------------------------------------------------------------
-# Stage 2: Build Backend (Node.js + Express + TypeScript + tsdav + ical.js)
+# Stage 2: Build Backend & Prod node_modules (Ren JS - arkitekturuafhængig)
 # ------------------------------------------------------------------------------
-FROM node:22-alpine AS backend-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine AS backend-builder
 WORKDIR /app/backend
 
 COPY backend/package.json ./
 RUN npm install --no-audit --no-fund
 
 COPY backend/ ./
-RUN npm run build
+RUN npm run build && npm prune --omit=dev
 
 # ------------------------------------------------------------------------------
-# Stage 3: Production Runtime (Letvægts Alpine - virker på x86_64 og ARM64)
+# Stage 3: Production Runtime (Target arkitektur: linux/amd64 eller linux/arm64)
 # ------------------------------------------------------------------------------
 FROM node:22-alpine AS runtime
 WORKDIR /app
@@ -36,18 +37,14 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Installér kun produktions-afhængigheder til backend
 COPY backend/package.json ./
-RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
-
-# Kopiér kompileret backend og bygget frontend PWA
+COPY --from=backend-builder /app/backend/node_modules ./node_modules
 COPY --from=backend-builder /app/backend/dist ./dist
 COPY --from=frontend-builder /app/frontend/dist ./public
 
 # Opret data-mappe til offentlige delingslinks med skriverettighed for node-brugeren
 RUN mkdir -p /app/data && chown -R node:node /app/data
 
-# Kør som ikke-root bruger for øget sikkerhed i Docker
 USER node
 
 EXPOSE 3000

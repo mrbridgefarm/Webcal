@@ -13,13 +13,19 @@ import {
   Share2,
   LogOut,
   Lock,
-  X
+  X,
+  HelpCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Keyboard,
+  ShieldCheck
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../stores/calendarStore';
 import type { CalendarEvent } from '../types/calendar';
 
 const props = defineProps<{
   titleText: string;
+  sidebarCollapsed: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -28,10 +34,12 @@ const emit = defineEmits<{
   (e: 'today'): void;
   (e: 'change-view', view: 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay'): void;
   (e: 'jump-to-date', dateIso: string): void;
+  (e: 'toggle-sidebar'): void;
 }>();
 
 const store = useCalendarStore();
 const isSearchFocused = ref(false);
+const isHelpOpen = ref(false);
 
 const showSearchDropdown = computed(
   () => isSearchFocused.value && store.searchQuery.trim().length > 0
@@ -60,9 +68,20 @@ function formatShortDateTime(ev: CalendarEvent): string {
 </script>
 
 <template>
-  <header class="h-16 bg-slate-900/95 border-b border-slate-800 px-4 flex items-center justify-between gap-4 select-none z-30">
-    <!-- Venstre: Logo & Kalender-navigation -->
-    <div class="flex items-center gap-4">
+  <header class="h-16 bg-slate-900/95 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between gap-3 select-none z-30">
+    <!-- Venstre: Sidebar Toggle, Logo & Kalender-navigation -->
+    <div class="flex items-center gap-3">
+      <!-- Knap til at klappe sidepanelet ind/ud -->
+      <button
+        type="button"
+        class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+        :title="props.sidebarCollapsed ? 'Vis sidepanel' : 'Skjul sidepanel (mere plads til kalenderen)'"
+        @click="emit('toggle-sidebar')"
+      >
+        <PanelLeftOpen v-if="props.sidebarCollapsed" class="w-4 h-4 text-blue-400" />
+        <PanelLeftClose v-else class="w-4 h-4" />
+      </button>
+
       <div class="flex items-center gap-2.5">
         <div class="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
           <CalendarIcon class="w-5 h-5" />
@@ -184,7 +203,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
       </div>
     </div>
 
-    <!-- Højre: Undo (Ctrl+Z), Visningsskift, Del kalender, Sync, Log ud & Ny begivenhed -->
+    <!-- Højre: Undo (Ctrl+Z), Visningsskift, Del kalender, Hjælp/Genveje, Sync, Log ud & Ny begivenhed -->
     <div class="flex items-center gap-2">
       <!-- Fortryd (Ctrl+Z) - kun når logget ind -->
       <button
@@ -244,6 +263,69 @@ function formatShortDateTime(ev: CalendarEvent): string {
         <Share2 class="w-3.5 h-3.5 text-blue-400" />
         <span class="hidden xl:inline">Del kalender</span>
       </button>
+
+      <!-- Hjælp / Hurtige Genveje Popover -->
+      <div v-if="!store.isPublicShareMode" class="relative">
+        <button
+          type="button"
+          class="p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+          title="Hurtige genveje & hjælp"
+          @click="isHelpOpen = !isHelpOpen"
+        >
+          <HelpCircle class="w-4 h-4 text-blue-400" />
+        </button>
+
+        <!-- Popover med genveje -->
+        <div
+          v-if="isHelpOpen"
+          class="fixed inset-0 z-40"
+          @click="isHelpOpen = false"
+        ></div>
+        <div
+          v-if="isHelpOpen"
+          class="absolute right-0 mt-2 w-80 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-4 z-50 text-xs space-y-3"
+        >
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+            <span class="flex items-center gap-1.5 font-bold text-slate-100">
+              <Keyboard class="w-4 h-4 text-blue-400" />
+              Hurtige Genveje &amp; Hjælp
+            </span>
+            <button
+              type="button"
+              class="text-slate-400 hover:text-slate-200"
+              @click="isHelpOpen = false"
+            >
+              <X class="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div class="grid grid-cols-2 gap-y-2 text-[11px] text-slate-300">
+            <span>Kopiér vagt / dag:</span>
+            <kbd class="justify-self-end px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-100 rounded text-[10px] font-semibold">Ctrl + C</kbd>
+            <span>Klip begivenhed:</span>
+            <kbd class="justify-self-end px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-100 rounded text-[10px] font-semibold">Ctrl + X</kbd>
+            <span>Indsæt på valgt dag:</span>
+            <kbd class="justify-self-end px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-100 rounded text-[10px] font-semibold">Ctrl + V</kbd>
+            <span>Fortryd handling:</span>
+            <kbd class="justify-self-end px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-100 rounded text-[10px] font-semibold">Ctrl + Z</kbd>
+            <span>Slet til papirkurv:</span>
+            <kbd class="justify-self-end px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-100 rounded text-[10px] font-semibold">Delete</kbd>
+            <span>Markér flere aftaler:</span>
+            <kbd class="justify-self-end px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-100 rounded text-[10px] font-semibold">Ctrl + Klik</kbd>
+            <span>Opret / Redigér:</span>
+            <span class="justify-self-end text-[10px] text-slate-400">Dobbeltklik</span>
+            <span>Kontekstmenu:</span>
+            <span class="justify-self-end text-[10px] text-slate-400">Højreklik</span>
+          </div>
+
+          <div class="pt-2 border-t border-slate-800 flex items-start gap-2 text-[11px] text-slate-400">
+            <ShieldCheck class="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+            <span>
+              <strong class="text-slate-200">Mødesikkerhed aktiv:</strong> Møder med andre inviterede deltagere spærres automatisk for <code class="text-slate-300">Ctrl+C</code>.
+            </span>
+          </div>
+        </div>
+      </div>
 
       <!-- Offline / Online & Sync -->
       <button
