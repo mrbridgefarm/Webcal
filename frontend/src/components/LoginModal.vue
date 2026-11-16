@@ -1,56 +1,82 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { Server, KeyRound, Mail, Globe, Sparkles, X, AlertCircle } from 'lucide-vue-next';
+import { ref, watch, computed } from 'vue';
+import { Server, KeyRound, Mail, Globe, X, AlertCircle, Calendar as CalendarIcon } from 'lucide-vue-next';
 import { useCalendarStore } from '../stores/calendarStore';
 
 const store = useCalendarStore();
 
-const serverUrl = ref(
-  store.session?.mode === 'CALDAV'
-    ? store.session.serverUrl
-    : 'https://mail.ditdomæne.dk/SOGo/dav/'
-);
-const username = ref(
-  store.session?.mode === 'CALDAV' ? store.session.username : ''
-);
+const serverUrl = ref('');
+const username = ref('');
 const password = ref('');
 const errorMsg = ref('');
+const showCustomServerField = ref(false);
+
+const canCloseModal = computed(() => store.isAuthenticated);
+
+watch(
+  () => [store.isLoginModalOpen, store.defaultServerUrl, store.session] as const,
+  () => {
+    if (store.session?.mode === 'CALDAV' && store.session.serverUrl) {
+      serverUrl.value = store.session.serverUrl;
+      username.value = store.session.username;
+    } else if (store.defaultServerUrl) {
+      serverUrl.value = store.defaultServerUrl;
+    }
+  },
+  { immediate: true }
+);
 
 async function handleLogin() {
   errorMsg.value = '';
+  const effectiveUrl = serverUrl.value.trim() || store.defaultServerUrl;
+  if (!effectiveUrl) {
+    errorMsg.value = 'Angiv venligst Mailcow / SOGo Server URL (eller sæt DEFAULT_CALDAV_URL i .env).';
+    showCustomServerField.value = true;
+    return;
+  }
+
   try {
-    await store.loginToMailcow(serverUrl.value, username.value, password.value);
+    await store.loginToMailcow(effectiveUrl, username.value, password.value);
     password.value = '';
   } catch (err: any) {
     errorMsg.value = err?.message || 'Kunne ikke oprette forbindelse til Mailcow/SOGo.';
   }
 }
 
-async function handleDemoMode() {
-  errorMsg.value = '';
-  await store.activateDemoMode(true);
+function tryClose() {
+  if (canCloseModal.value) {
+    store.isLoginModalOpen = false;
+  }
 }
 </script>
 
 <template>
   <Teleport to="body">
     <div
-      v-if="store.isLoginModalOpen"
-      class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
-      @click.self="store.isLoginModalOpen = false"
+      v-if="store.isLoginModalOpen || (!store.isAuthenticated && !store.isPublicShareMode)"
+      class="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4"
+      @click.self="tryClose"
     >
       <div class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
         <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <Server class="w-4 h-4 text-blue-400" />
-            <h3 class="text-base font-bold text-slate-100">
-              Mailcow / SOGo CalDAV Forbindelse
-            </h3>
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
+              <CalendarIcon class="w-4 h-4" />
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-slate-100 leading-tight">
+                Log ind på DAV-Sync Cal
+              </h3>
+              <p class="text-[11px] text-slate-400">
+                Kræver dit Mailcow / SOGo login
+              </p>
+            </div>
           </div>
           <button
+            v-if="canCloseModal"
             type="button"
             class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
-            @click="store.isLoginModalOpen = false"
+            @click="tryClose"
           >
             <X class="w-4 h-4" />
           </button>
@@ -65,7 +91,33 @@ async function handleDemoMode() {
             <span>{{ errorMsg }}</span>
           </div>
 
-          <div>
+          <!-- Hvis DEFAULT_CALDAV_URL er sat i .env, vises den som forudkonfigureret -->
+          <div
+            v-if="store.defaultServerUrl && !showCustomServerField"
+            class="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <Server class="w-4 h-4 text-emerald-400 shrink-0" />
+              <div class="min-w-0">
+                <div class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                  Mailcow Server (.env)
+                </div>
+                <div class="text-xs text-slate-200 font-medium truncate">
+                  {{ store.defaultServerUrl }}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="text-[11px] text-blue-400 hover:underline shrink-0"
+              @click="showCustomServerField = true"
+            >
+              Skift server
+            </button>
+          </div>
+
+          <!-- Server URL felt (vises hvis DEFAULT_CALDAV_URL ikke er sat i .env eller brugeren klikker "Skift server") -->
+          <div v-else>
             <label class="flex items-center gap-1.5 text-slate-300 font-medium mb-1">
               <Globe class="w-3.5 h-3.5 text-blue-400" /> Mailcow / SOGo Server URL
             </label>
@@ -73,11 +125,11 @@ async function handleDemoMode() {
               v-model="serverUrl"
               type="text"
               required
-              placeholder="https://mail.ditdomæne.dk/SOGo/dav/"
+              placeholder="https://post2ko.bridgefarm.dk/SOGo/dav/"
               class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
             />
             <p class="text-[11px] text-slate-500 mt-1">
-              Du kan indtaste både domænet (<code>post2ko.bridgefarm.dk</code>), <code>/SOGo/dav/</code> eller dit direkte SOGo kalenderlink (<code>.../SOGo/dav/mail@.../Calendar/personal/</code>).
+              Tip: Sæt <code>DEFAULT_CALDAV_URL</code> i din <code>.env</code> / <code>compose.yaml</code>, så serveren vælges automatisk.
             </p>
           </div>
 
@@ -89,7 +141,8 @@ async function handleDemoMode() {
               v-model="username"
               type="email"
               required
-              placeholder="navn@ditdomæne.dk"
+              autofocus
+              placeholder="mail@bridgefarm.dk"
               class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
             />
           </div>
@@ -112,22 +165,7 @@ async function handleDemoMode() {
             :disabled="store.isSyncing"
             class="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold shadow transition"
           >
-            {{ store.isSyncing ? 'Validerer mod Mailcow...' : 'Log ind & Synkronisér med Mailcow' }}
-          </button>
-
-          <div class="relative flex py-1 items-center">
-            <div class="flex-grow border-t border-slate-800"></div>
-            <span class="flex-shrink mx-3 text-slate-500 text-[11px]">ELLER</span>
-            <div class="flex-grow border-t border-slate-800"></div>
-          </div>
-
-          <button
-            type="button"
-            class="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-medium flex items-center justify-center gap-1.5 transition"
-            @click="handleDemoMode"
-          >
-            <Sparkles class="w-3.5 h-3.5" />
-            Kør / Nulstil Demo-tilstand (Uden live server)
+            {{ store.isSyncing ? 'Logger ind på Mailcow...' : 'Log ind på Mailcow' }}
           </button>
         </form>
       </div>

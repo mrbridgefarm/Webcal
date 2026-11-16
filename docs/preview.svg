@@ -38,9 +38,9 @@
   <line x1="588" y1="37" x2="593" y2="42" stroke="#64748b" stroke-width="1.8"/>
   <text x="602" y="37" fill="#64748b" font-size="11.5">Lyn-søg i lokalt indeks (titel, lokation, deltagere)...</text>
 
-  <!-- Right Controls: Collision Badge, Undo, View Switch, Sync, New Event -->
-  <rect x="890" y="19" width="92" height="28" rx="7" fill="#451a03" stroke="#f59e0b" stroke-width="1"/>
-  <text x="936" y="37" fill="#fcd34d" font-size="11" font-weight="600" text-anchor="middle">⚠ 2 kollisioner</text>
+  <!-- Right Controls: Share Calendar, Undo, View Switch, Sync, New Event -->
+  <rect x="886" y="19" width="96" height="28" rx="7" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+  <text x="934" y="37" fill="#93c5fd" font-size="11" font-weight="600" text-anchor="middle">🔗 Del kalender</text>
 
   <rect x="990" y="19" width="76" height="28" rx="7" fill="#1e293b" stroke="#334155"/>
   <text x="1028" y="37" fill="#e2e8f0" font-size="11" font-weight="600" text-anchor="middle">↶ Fortryd 2</text>
@@ -167,11 +167,11 @@
   <rect x="310" y="410" width="126" height="22" rx="5" fill="#059669" stroke="#34d399" stroke-width="2" stroke-dasharray="4 2"/>
   <rect x="314" y="414" width="28" height="14" rx="3" fill="#022c22"/>
   <text x="328" y="424" fill="#6ee7b7" font-size="8.5" font-weight="700" text-anchor="middle">KOPI</text>
-  <text x="346" y="425" fill="#ffffff" font-size="10" font-weight="600">08:00 Dagvagt ⚠️</text>
+  <text x="346" y="425" fill="#ffffff" font-size="10" font-weight="600">08:00 Dagvagt</text>
 
-  <!-- Event 2: Meeting with Attendees & Collision on Nov 16 -->
-  <rect x="310" y="436" width="126" height="22" rx="5" fill="#2563eb" stroke="#f59e0b" stroke-width="2"/>
-  <text x="316" y="451" fill="#ffffff" font-size="10" font-weight="600">10:00 Arkitektur ⚠️👥</text>
+  <!-- Event 2: Meeting with Attendees on Nov 16 -->
+  <rect x="310" y="436" width="126" height="22" rx="5" fill="#2563eb"/>
+  <text x="316" y="451" fill="#ffffff" font-size="10" font-weight="600">10:00 Arkitektur 👥</text>
 
   <!-- Nov 17 -->
   <text x="564" y="398" fill="#cbd5e1" font-size="11" font-weight="600" text-anchor="end">17.</text>

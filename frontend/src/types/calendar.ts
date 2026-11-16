@@ -75,7 +75,7 @@ export interface UndoAction {
 export interface ClipboardState {
   mode: 'COPY' | 'CUT' | null;
   events: CalendarEvent[];
-  sourceAnchorDate: string | null; // YYYY-MM-DD for første kopierede event (bruges til multi-dag paste)
+  sourceAnchorDate: string | null;
   copiedAt: string | null;
 }
 
@@ -85,14 +85,25 @@ export interface ContextMenuState {
   y: number;
   targetType: 'EVENT' | 'DATE';
   event?: CalendarEvent | null;
-  dateStr?: string | null; // ISO eller YYYY-MM-DD
+  dateStr?: string | null;
   allDay?: boolean;
 }
 
 export interface AuthSession {
-  mode: 'DEMO' | 'CALDAV';
+  mode: 'CALDAV' | 'PUBLIC_SHARE';
   serverUrl: string;
   username: string;
   password?: string;
+  shareToken?: string;
+  shareLabel?: string;
   connectedAt: string;
+}
+
+export interface PublicShareLink {
+  token: string;
+  label: string;
+  calendarUrls: string[];
+  calendarNames: string[];
+  hideDetails: boolean;
+  createdAt: string;
 }

@@ -44,6 +44,9 @@ RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=backend-builder /app/backend/dist ./dist
 COPY --from=frontend-builder /app/frontend/dist ./public
 
+# Opret data-mappe til offentlige delingslinks med skriverettighed for node-brugeren
+RUN mkdir -p /app/data && chown -R node:node /app/data
+
 # Kør som ikke-root bruger for øget sikkerhed i Docker
 USER node
 

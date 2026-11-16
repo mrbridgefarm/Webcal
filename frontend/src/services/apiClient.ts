@@ -2,7 +2,8 @@ import type {
   AuthSession,
   CalendarSource,
   CalendarEvent,
-  RsvpStatus
+  RsvpStatus,
+  PublicShareLink
 } from '../types/calendar';
 
 export interface LoginResponse {
@@ -21,6 +22,17 @@ export interface SyncResponse {
   error?: string;
 }
 
+export interface PublicShareResponse {
+  ok: boolean;
+  label: string;
+  owner: string;
+  hideDetails: boolean;
+  calendars: Omit<CalendarSource, 'visible'>[];
+  events: CalendarEvent[];
+  syncedAt: string;
+  error?: string;
+}
+
 function buildAuthHeaders(session: AuthSession): Record<string, string> {
   return {
     'Content-Type': 'application/json',
@@ -28,6 +40,18 @@ function buildAuthHeaders(session: AuthSession): Record<string, string> {
     'x-caldav-user': session.username || '',
     'x-caldav-password': session.password || ''
   };
+}
+
+export async function apiGetServerConfig(): Promise<{ defaultServerUrl: string }> {
+  try {
+    const res = await fetch('/api/caldav/config');
+    const data = await res.json();
+    return {
+      defaultServerUrl: data?.defaultServerUrl || ''
+    };
+  } catch {
+    return { defaultServerUrl: '' };
+  }
 }
 
 export async function apiLoginCalDav(
@@ -177,4 +201,62 @@ export async function apiDeleteCalendar(
   if (!res.ok || !data.ok) {
     throw new Error(data.error || 'Kunne ikke slette kalenderen på serveren.');
   }
+}
+
+export async function apiListShares(session: AuthSession): Promise<PublicShareLink[]> {
+  const res = await fetch('/api/caldav/shares', {
+    method: 'GET',
+    headers: buildAuthHeaders(session)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke hente delingslinks.');
+  }
+  return data.shares || [];
+}
+
+export async function apiCreateShare(
+  session: AuthSession,
+  params: {
+    label: string;
+    calendarUrls: string[];
+    calendarNames: string[];
+    hideDetails: boolean;
+  }
+): Promise<PublicShareLink> {
+  const res = await fetch('/api/caldav/shares', {
+    method: 'POST',
+    headers: buildAuthHeaders(session),
+    body: JSON.stringify({
+      serverUrl: session.serverUrl,
+      username: session.username,
+      password: session.password,
+      ...params
+    })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke oprette delingslink.');
+  }
+  return data.share;
+}
+
+export async function apiDeleteShare(session: AuthSession, token: string): Promise<void> {
+  const res = await fetch(`/api/caldav/shares/${encodeURIComponent(token)}`, {
+    method: 'DELETE',
+    headers: buildAuthHeaders(session)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke slette delingslink.');
+  }
+}
+
+export async function apiFetchPublicShare(token: string): Promise<PublicShareResponse> {
+  const res = await fetch(`/api/caldav/public/${encodeURIComponent(token)}`);
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Delingslinket er ugyldigt eller udløbet.');
+  }
+  return data;
 }

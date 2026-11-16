@@ -7,6 +7,7 @@ import ContextMenu from './components/ContextMenu.vue';
 import EventModal from './components/EventModal.vue';
 import TrashModal from './components/TrashModal.vue';
 import LoginModal from './components/LoginModal.vue';
+import ShareModal from './components/ShareModal.vue';
 import { useCalendarStore } from './stores/calendarStore';
 import {
   X,
@@ -16,7 +17,8 @@ import {
   XCircle,
   ClipboardPaste,
   Copy,
-  Scissors
+  Scissors,
+  Lock
 } from 'lucide-vue-next';
 
 const store = useCalendarStore();
@@ -34,29 +36,24 @@ function isTypingInInput(target: EventTarget | null): boolean {
   );
 }
 
-/**
- * Globale tastatur-listeners til "Drysset":
- * - Ctrl+C: Kopiér valgt(e) begivenhed(er) eller dag (spærres hvis mødet har deltagere)
- * - Ctrl+X: Klip valgt(e) begivenhed(er)
- * - Ctrl+V: Indsæt på den valgte mål-dato (låses hvis mål-kalenderen er Read-Only)
- * - Ctrl+Z: Fortryd seneste handling lokalt
- * - Delete / Backspace: Slet valgt(e) begivenhed(er) til 30-dages papirkurv
- * - Escape: Luk åbne menuer/modaler
- */
 function handleGlobalKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     store.closeContextMenu();
     if (store.isEventModalOpen) store.isEventModalOpen = false;
     if (store.isTrashModalOpen) store.isTrashModalOpen = false;
-    if (store.isLoginModalOpen) store.isLoginModalOpen = false;
+    if (store.isShareModalOpen) store.isShareModalOpen = false;
+    if (store.isLoginModalOpen && store.isAuthenticated) store.isLoginModalOpen = false;
     return;
   }
 
   if (
+    store.isPublicShareMode ||
+    !store.isAuthenticated ||
     isTypingInInput(e.target) ||
     store.isEventModalOpen ||
     store.isLoginModalOpen ||
-    store.isTrashModalOpen
+    store.isTrashModalOpen ||
+    store.isShareModalOpen
   ) {
     return;
   }
@@ -96,80 +93,100 @@ onUnmounted(() => {
 
 <template>
   <div class="h-screen w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden">
-    <!-- TopBar -->
-    <TopBar
-      :title-text="currentTitle"
-      @prev="calendarGridRef?.goPrev()"
-      @next="calendarGridRef?.goNext()"
-      @today="calendarGridRef?.goToday()"
-      @change-view="(v) => calendarGridRef?.changeView(v)"
-      @jump-to-date="(d) => calendarGridRef?.jumpToDate(d)"
-    />
-
-    <!-- Hovedområde: Sidebar + KalenderGrid -->
-    <div class="flex-1 flex min-h-0 overflow-hidden">
-      <Sidebar />
-      <CalendarGrid
-        ref="calendarGridRef"
-        @title-change="(t) => (currentTitle = t)"
-      />
+    <!-- Hvis et offentligt delingslink er ugyldigt eller tilbagekaldt -->
+    <div
+      v-if="store.publicShareError"
+      class="flex-1 flex items-center justify-center p-6"
+    >
+      <div class="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-3 shadow-2xl">
+        <div class="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 mx-auto">
+          <Lock class="w-6 h-6" />
+        </div>
+        <h2 class="text-base font-bold text-slate-100">Delingslink ikke tilgængeligt</h2>
+        <p class="text-xs text-slate-400 leading-relaxed">
+          {{ store.publicShareError }}
+        </p>
+      </div>
     </div>
 
-    <!-- Svævende Udklipsholder-bjælke nederst i midten når noget er kopieret/klippet -->
-    <div
-      v-if="store.clipboard.events.length > 0"
-      class="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md border-2 border-emerald-500/60 rounded-2xl shadow-2xl px-4 py-2.5 flex items-center gap-4 text-xs"
-    >
-      <div class="flex items-center gap-2">
-        <div class="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-300">
-          <Copy v-if="store.clipboard.mode === 'COPY'" class="w-4 h-4" />
-          <Scissors v-else class="w-4 h-4" />
-        </div>
-        <div>
-          <div class="font-semibold text-slate-100">
-            {{ store.clipboard.mode === 'CUT' ? 'Klippet:' : 'Kopieret:' }}
-            <span class="text-emerald-300">
-              {{
-                store.clipboard.events.length === 1
-                  ? store.clipboard.events[0].title
-                  : `${store.clipboard.events.length} begivenheder`
-              }}
-            </span>
-          </div>
-          <div class="text-[11px] text-slate-400">
-            Klik på ønsket dato (valgt: <strong class="text-blue-300">{{ store.selectedDateStr.slice(0, 10) }}</strong>) og tryk <kbd class="px-1 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl+V</kbd>
-          </div>
-        </div>
+    <!-- Kalender-visningen vises kun når brugeren er logget ind på Mailcow ELLER åbner et gyldigt offentligt delingslink -->
+    <template v-else-if="store.isAuthenticated">
+      <TopBar
+        :title-text="currentTitle"
+        @prev="calendarGridRef?.goPrev()"
+        @next="calendarGridRef?.goNext()"
+        @today="calendarGridRef?.goToday()"
+        @change-view="(v) => calendarGridRef?.changeView(v)"
+        @jump-to-date="(d) => calendarGridRef?.jumpToDate(d)"
+      />
+
+      <div class="flex-1 flex min-h-0 overflow-hidden">
+        <Sidebar />
+        <CalendarGrid
+          ref="calendarGridRef"
+          @title-change="(t) => (currentTitle = t)"
+        />
       </div>
 
-      <button
-        type="button"
-        class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 shadow transition"
-        @click="store.pasteToDate()"
+      <!-- Svævende Udklipsholder-bjælke nederst i midten når noget er kopieret/klippet -->
+      <div
+        v-if="!store.isPublicShareMode && store.clipboard.events.length > 0"
+        class="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md border-2 border-emerald-500/60 rounded-2xl shadow-2xl px-4 py-2.5 flex items-center gap-4 text-xs"
       >
-        <ClipboardPaste class="w-3.5 h-3.5" />
-        Indsæt på {{ store.selectedDateStr.slice(0, 10) }}
-      </button>
+        <div class="flex items-center gap-2">
+          <div class="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-300">
+            <Copy v-if="store.clipboard.mode === 'COPY'" class="w-4 h-4" />
+            <Scissors v-else class="w-4 h-4" />
+          </div>
+          <div>
+            <div class="font-semibold text-slate-100">
+              {{ store.clipboard.mode === 'CUT' ? 'Klippet:' : 'Kopieret:' }}
+              <span class="text-emerald-300">
+                {{
+                  store.clipboard.events.length === 1
+                    ? store.clipboard.events[0].title
+                    : `${store.clipboard.events.length} begivenheder`
+                }}
+              </span>
+            </div>
+            <div class="text-[11px] text-slate-400">
+              Klik på ønsket dato (valgt: <strong class="text-blue-300">{{ store.selectedDateStr.slice(0, 10) }}</strong>) og tryk <kbd class="px-1 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl+V</kbd>
+            </div>
+          </div>
+        </div>
 
-      <button
-        type="button"
-        class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
-        title="Ryd udklipsholder"
-        @click="store.clearClipboard()"
-      >
-        <X class="w-4 h-4" />
-      </button>
-    </div>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 shadow transition"
+          @click="store.pasteToDate()"
+        >
+          <ClipboardPaste class="w-3.5 h-3.5" />
+          Indsæt på {{ store.selectedDateStr.slice(0, 10) }}
+        </button>
 
-    <!-- Custom Højrekliksmenu (overskriver browserens standardmenu) -->
-    <ContextMenu />
+        <button
+          type="button"
+          class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
+          title="Ryd udklipsholder"
+          @click="store.clearClipboard()"
+        >
+          <X class="w-4 h-4" />
+        </button>
+      </div>
 
-    <!-- Modaler -->
-    <EventModal />
-    <TrashModal />
+      <!-- Custom Højrekliksmenu -->
+      <ContextMenu />
+
+      <!-- Modaler -->
+      <EventModal />
+      <TrashModal />
+      <ShareModal />
+    </template>
+
+    <!-- LoginModal (krævet før man kan se noget, medmindre man åbner et offentligt delingslink) -->
     <LoginModal />
 
-    <!-- Toast Notifikationer (Nederst til højre) -->
+    <!-- Toast Notifikationer -->
     <div class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
       <div
         v-for="t in store.toasts"

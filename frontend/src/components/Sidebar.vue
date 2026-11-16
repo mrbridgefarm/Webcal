@@ -13,7 +13,8 @@ import {
   X,
   Clock,
   Plus,
-  EyeOff
+  EyeOff,
+  Share2
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../stores/calendarStore';
 import { requestNotificationPermission } from '../services/notifications';
@@ -122,16 +123,17 @@ function removeSingleClipboardEvent(evId: string) {
       <div>
         <div class="flex items-center justify-between mb-2.5">
           <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">
-            SOGo Kalendere
+            {{ store.isPublicShareMode ? 'Delte Kalendere' : 'SOGo Kalendere' }}
           </h2>
           <div class="flex items-center gap-2">
             <span class="text-[11px] text-slate-500">
               {{ store.calendars.length }} aktive
             </span>
             <button
+              v-if="!store.isPublicShareMode"
               type="button"
               class="p-1 rounded-md bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white border border-slate-700 transition"
-              title="Tilføj ny kalender"
+              title="Tilføj eller opret ny kalender"
               @click="showNewCalendarForm = !showNewCalendarForm"
             >
               <Plus class="w-3.5 h-3.5" />
@@ -141,7 +143,7 @@ function removeSingleClipboardEvent(evId: string) {
 
         <!-- Formular: Ny kalender eller tilføj eksisterende CalDAV-link -->
         <form
-          v-if="showNewCalendarForm"
+          v-if="showNewCalendarForm && !store.isPublicShareMode"
           class="mb-2.5 p-2.5 rounded-xl bg-slate-950 border border-blue-500/40 space-y-2"
           @submit.prevent="submitNewCalendar"
         >
@@ -210,37 +212,48 @@ function removeSingleClipboardEvent(evId: string) {
                   <span
                     v-if="cal.readOnly"
                     class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px] font-semibold shrink-0"
-                    title="Skrivebeskyttet delt kalender — Redigering, Træk-og-Slip og Ctrl+V er låst"
+                    title="Skrivebeskyttet kalender (Read-Only)"
                   >
                     <Lock class="w-2.5 h-2.5" />
                     Read-Only
                   </span>
                 </div>
                 <div v-if="cal.isShared || cal.owner" class="text-[10px] text-slate-400 truncate">
-                  Delt af {{ cal.owner || 'kollega' }}
+                  Delt af {{ cal.owner || 'ejer' }}
                 </div>
               </div>
             </label>
 
-            <!-- Farvevælger + Gendan SOGo serverfarve + Slet/Fjern -->
+            <!-- Handlinger: Del kalender, Slet, Skjul & Farvevælger -->
             <div class="flex items-center gap-1 shrink-0">
-              <button
-                v-if="!cal.readOnly && !cal.isShared"
-                type="button"
-                class="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
-                title="Slet kalender (inkl. alle begivenheder)"
-                @click="confirmDeleteCalendar(cal.id, cal.name)"
-              >
-                <Trash2 class="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                class="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
-                title="Fjern/skjul kalender fra listen"
-                @click="store.hideCalendar(cal.id)"
-              >
-                <EyeOff class="w-3 h-3" />
-              </button>
+              <template v-if="!store.isPublicShareMode">
+                <button
+                  type="button"
+                  class="p-1 rounded hover:bg-blue-500/20 text-slate-400 hover:text-blue-300 transition"
+                  title="Del denne kalender via offentligt Read-Only link"
+                  @click="store.openShareModal(cal.id)"
+                >
+                  <Share2 class="w-3 h-3" />
+                </button>
+                <button
+                  v-if="!cal.readOnly && !cal.isShared"
+                  type="button"
+                  class="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
+                  title="Slet kalender (inkl. alle begivenheder)"
+                  @click="confirmDeleteCalendar(cal.id, cal.name)"
+                >
+                  <Trash2 class="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  class="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                  title="Fjern/skjul kalender fra listen"
+                  @click="store.hideCalendar(cal.id)"
+                >
+                  <EyeOff class="w-3 h-3" />
+                </button>
+              </template>
+
               <button
                 v-if="cal.localColorOverride && cal.localColorOverride !== cal.serverColor"
                 type="button"
@@ -267,7 +280,7 @@ function removeSingleClipboardEvent(evId: string) {
         </div>
 
         <button
-          v-if="store.hiddenCalendarIds.length > 0"
+          v-if="!store.isPublicShareMode && store.hiddenCalendarIds.length > 0"
           type="button"
           class="mt-2 w-full py-1 px-2 rounded-lg bg-slate-800/60 hover:bg-slate-800 border border-slate-700/70 text-[11px] text-slate-300 flex items-center justify-center gap-1.5 transition"
           @click="store.restoreHiddenCalendars()"
@@ -277,168 +290,193 @@ function removeSingleClipboardEvent(evId: string) {
         </button>
       </div>
 
-      <!-- Standard kalender til Ctrl+V / Nye begivenheder -->
-      <div v-if="store.writableCalendars.length > 1">
-        <label class="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-          Mål-kalender (Ny / Indsæt)
-        </label>
-        <select
-          v-model="store.activeTargetCalendarId"
-          class="w-full text-xs bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-slate-200 focus:outline-none focus:border-blue-500"
-        >
-          <option
-            v-for="wCal in store.writableCalendars"
-            :key="wCal.id"
-            :value="wCal.id"
-          >
-            {{ wCal.name }}
-          </option>
-        </select>
+      <!-- I offentlig Read-Only delingstilstand vises blot en kort info-boks -->
+      <div
+        v-if="store.isPublicShareMode"
+        class="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-1.5 text-xs text-amber-200"
+      >
+        <div class="flex items-center gap-1.5 font-semibold">
+          <Lock class="w-4 h-4 text-amber-400" />
+          <span>Offentlig Kalender (Kun visning)</span>
+        </div>
+        <p class="text-[11px] text-slate-300 leading-relaxed">
+          Du ser en delt kalender i skrivebeskyttet tilstand. Du kan klikke på aftaler for at se detaljer, skifte mellem Måned/Uge/Dag og søge i kalenderen.
+        </p>
       </div>
 
-      <!-- Aktiv Udklipsholder ("Drysset" Copy/Paste boks) -->
-      <div
-        class="p-3 rounded-xl border transition-all space-y-2.5"
-        :class="store.clipboard.events.length > 0
-          ? 'bg-emerald-950/20 border-emerald-500/50 shadow-lg shadow-emerald-950/20'
-          : 'bg-slate-950/90 border-slate-800'"
-      >
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-1.5 text-xs font-bold text-slate-100">
-            <Clipboard v-if="store.clipboard.mode !== 'CUT'" class="w-4 h-4 text-emerald-400" />
-            <Scissors v-else class="w-4 h-4 text-amber-400" />
-            <span>Udklipsholder</span>
-          </div>
-
-          <div v-if="store.clipboard.events.length > 0" class="flex items-center gap-1.5">
-            <span
-              class="text-[10px] font-bold px-2 py-0.5 rounded-full"
-              :class="store.clipboard.mode === 'CUT'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'"
+      <template v-else>
+        <!-- Standard kalender til Ctrl+V / Nye begivenheder -->
+        <div v-if="store.writableCalendars.length > 1">
+          <label class="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+            Mål-kalender (Ny / Indsæt)
+          </label>
+          <select
+            v-model="store.activeTargetCalendarId"
+            class="w-full text-xs bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-slate-200 focus:outline-none focus:border-blue-500"
+          >
+            <option
+              v-for="wCal in store.writableCalendars"
+              :key="wCal.id"
+              :value="wCal.id"
             >
-              {{ store.clipboard.mode === 'CUT' ? 'KLIPPET' : 'KOPIERET' }} ({{ store.clipboard.events.length }})
-            </span>
-            <button
-              type="button"
-              class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition"
-              title="Tøm udklipsholder"
-              @click="store.clearClipboard()"
-            >
-              <X class="w-3.5 h-3.5" />
-            </button>
-          </div>
+              {{ wCal.name }}
+            </option>
+          </select>
         </div>
 
-        <!-- Liste over kopierede/klippede aftaler i udklipsholderen -->
-        <div v-if="store.clipboard.events.length > 0" class="space-y-2">
-          <div class="max-h-48 overflow-y-auto space-y-1.5 pr-0.5">
-            <div
-              v-for="ev in store.clipboard.events"
-              :key="ev.id"
-              class="p-2 rounded-lg bg-slate-900/95 border border-slate-700/80 flex items-start justify-between gap-2"
-            >
-              <div class="flex items-start gap-2 min-w-0">
-                <span
-                  class="w-2.5 h-2.5 rounded-full shrink-0 mt-1"
-                  :style="{ backgroundColor: store.getCalendarById(ev.calendarId)?.color || '#10b981' }"
-                ></span>
-                <div class="min-w-0">
-                  <div class="text-xs font-semibold text-slate-100 truncate" :title="ev.title">
-                    {{ ev.title }}
-                  </div>
-                  <div class="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5">
-                    <Clock class="w-2.5 h-2.5 shrink-0" />
-                    <span class="truncate">{{ formatEventTimeSpan(ev) }}</span>
-                  </div>
-                </div>
-              </div>
+        <!-- Aktiv Udklipsholder ("Drysset" Copy/Paste boks) -->
+        <div
+          class="p-3 rounded-xl border transition-all space-y-2.5"
+          :class="store.clipboard.events.length > 0
+            ? 'bg-emerald-950/20 border-emerald-500/50 shadow-lg shadow-emerald-950/20'
+            : 'bg-slate-950/90 border-slate-800'"
+        >
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-1.5 text-xs font-bold text-slate-100">
+              <Clipboard v-if="store.clipboard.mode !== 'CUT'" class="w-4 h-4 text-emerald-400" />
+              <Scissors v-else class="w-4 h-4 text-amber-400" />
+              <span>Udklipsholder</span>
+            </div>
+
+            <div v-if="store.clipboard.events.length > 0" class="flex items-center gap-1.5">
+              <span
+                class="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                :class="store.clipboard.mode === 'CUT'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                  : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'"
+              >
+                {{ store.clipboard.mode === 'CUT' ? 'KLIPPET' : 'KOPIERET' }} ({{ store.clipboard.events.length }})
+              </span>
               <button
                 type="button"
-                class="text-slate-500 hover:text-rose-400 p-0.5 shrink-0"
-                title="Fjern fra udklipsholder"
-                @click="removeSingleClipboardEvent(ev.id)"
+                class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition"
+                title="Tøm udklipsholder"
+                @click="store.clearClipboard()"
               >
-                <X class="w-3 h-3" />
+                <X class="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
 
-          <!-- Direkte Indsæt-knap i Udklipsholder-boksen -->
-          <div class="pt-1.5 border-t border-slate-800/90 space-y-1.5">
-            <div class="flex items-center justify-between text-[11px]">
-              <span class="text-slate-400">Valgt mål-dato:</span>
-              <strong class="text-blue-400 font-semibold">{{ store.selectedDateStr.slice(0, 10) }}</strong>
+          <!-- Liste over kopierede/klippede aftaler i udklipsholderen -->
+          <div v-if="store.clipboard.events.length > 0" class="space-y-2">
+            <div class="max-h-48 overflow-y-auto space-y-1.5 pr-0.5">
+              <div
+                v-for="ev in store.clipboard.events"
+                :key="ev.id"
+                class="p-2 rounded-lg bg-slate-900/95 border border-slate-700/80 flex items-start justify-between gap-2"
+              >
+                <div class="flex items-start gap-2 min-w-0">
+                  <span
+                    class="w-2.5 h-2.5 rounded-full shrink-0 mt-1"
+                    :style="{ backgroundColor: store.getCalendarById(ev.calendarId)?.color || '#10b981' }"
+                  ></span>
+                  <div class="min-w-0">
+                    <div class="text-xs font-semibold text-slate-100 truncate" :title="ev.title">
+                      {{ ev.title }}
+                    </div>
+                    <div class="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5">
+                      <Clock class="w-2.5 h-2.5 shrink-0" />
+                      <span class="truncate">{{ formatEventTimeSpan(ev) }}</span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="text-slate-500 hover:text-rose-400 p-0.5 shrink-0"
+                  title="Fjern fra udklipsholder"
+                  @click="removeSingleClipboardEvent(ev.id)"
+                >
+                  <X class="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            <!-- Direkte Indsæt-knap i Udklipsholder-boksen -->
+            <div class="pt-1.5 border-t border-slate-800/90 space-y-1.5">
+              <div class="flex items-center justify-between text-[11px]">
+                <span class="text-slate-400">Valgt mål-dato:</span>
+                <strong class="text-blue-400 font-semibold">{{ store.selectedDateStr.slice(0, 10) }}</strong>
+              </div>
+              <button
+                type="button"
+                class="w-full py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow transition"
+                @click="store.pasteToDate()"
+              >
+                <ClipboardPaste class="w-3.5 h-3.5" />
+                Indsæt her (Ctrl+V)
+              </button>
+            </div>
+          </div>
+
+          <!-- Hvis udklipsholderen er tom, men brugeren har klikket på en aftale -->
+          <div v-else-if="selectedEventsList.length > 0" class="space-y-2">
+            <div class="text-[11px] text-blue-300 font-medium">
+              Markeret nu ({{ selectedEventsList.length }}):
+            </div>
+            <div
+              v-for="selEv in selectedEventsList.slice(0, 3)"
+              :key="selEv.id"
+              class="p-2 rounded-lg bg-slate-900 border border-blue-500/40 text-xs"
+            >
+              <div class="font-semibold text-slate-100 truncate">{{ selEv.title }}</div>
+              <div class="text-[10px] text-slate-400 mt-0.5">{{ formatEventTimeSpan(selEv) }}</div>
             </div>
             <button
               type="button"
-              class="w-full py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow transition"
-              @click="store.pasteToDate()"
+              class="w-full py-1.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+              @click="store.copyOrCutSelection('COPY')"
             >
-              <ClipboardPaste class="w-3.5 h-3.5" />
-              Indsæt her (Ctrl+V)
+              <Copy class="w-3.5 h-3.5" />
+              Kopiér til udklipsholder (Ctrl+C)
             </button>
           </div>
+
+          <!-- Helt tom tilstand -->
+          <p v-else class="text-[11px] text-slate-400 leading-relaxed">
+            Markér en begivenhed eller dag og tryk <kbd class="px-1 py-0.5 bg-slate-800 rounded text-[10px] text-slate-200">Ctrl+C</kbd>, klik på en ny dag og tryk <kbd class="px-1 py-0.5 bg-slate-800 rounded text-[10px] text-slate-200">Ctrl+V</kbd>.
+          </p>
         </div>
 
-        <!-- Hvis udklipsholderen er tom, men brugeren har klikket på en aftale -->
-        <div v-else-if="selectedEventsList.length > 0" class="space-y-2">
-          <div class="text-[11px] text-blue-300 font-medium">
-            Markeret nu ({{ selectedEventsList.length }}):
+        <!-- Mødesikkerhed & Tastaturgenveje Info -->
+        <div class="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2 text-[11px] text-slate-400">
+          <div class="flex items-center gap-1.5 text-slate-200 font-semibold text-xs">
+            <Keyboard class="w-3.5 h-3.5 text-blue-400" />
+            <span>Hurtige Genveje</span>
           </div>
-          <div
-            v-for="selEv in selectedEventsList.slice(0, 3)"
-            :key="selEv.id"
-            class="p-2 rounded-lg bg-slate-900 border border-blue-500/40 text-xs"
-          >
-            <div class="font-semibold text-slate-100 truncate">{{ selEv.title }}</div>
-            <div class="text-[10px] text-slate-400 mt-0.5">{{ formatEventTimeSpan(selEv) }}</div>
+          <div class="grid grid-cols-2 gap-y-1 text-[11px]">
+            <span>Kopiér vagt/dag:</span>
+            <kbd class="justify-self-end px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl + C</kbd>
+            <span>Klip begivenhed:</span>
+            <kbd class="justify-self-end px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl + X</kbd>
+            <span>Indsæt på valgt dag:</span>
+            <kbd class="justify-self-end px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl + V</kbd>
+            <span>Fortryd handling:</span>
+            <kbd class="justify-self-end px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl + Z</kbd>
+            <span>Slet til papirkurv:</span>
+            <kbd class="justify-self-end px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Delete</kbd>
           </div>
-          <button
-            type="button"
-            class="w-full py-1.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition"
-            @click="store.copyOrCutSelection('COPY')"
-          >
-            <Copy class="w-3.5 h-3.5" />
-            Kopiér til udklipsholder (Ctrl+C)
-          </button>
+          <div class="pt-1.5 border-t border-slate-800/80 flex items-start gap-1.5 text-[10px] text-slate-400">
+            <ShieldCheck class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+            <span>
+              <strong>Mødesikkerhed aktiv:</strong> Møder med inviterede deltagere spærres automatisk for <code class="text-slate-300">Ctrl+C</code>.
+            </span>
+          </div>
         </div>
-
-        <!-- Helt tom tilstand -->
-        <p v-else class="text-[11px] text-slate-400 leading-relaxed">
-          Markér en begivenhed eller dag og tryk <kbd class="px-1 py-0.5 bg-slate-800 rounded text-[10px] text-slate-200">Ctrl+C</kbd>, klik på en ny dag og tryk <kbd class="px-1 py-0.5 bg-slate-800 rounded text-[10px] text-slate-200">Ctrl+V</kbd>.
-        </p>
-      </div>
-
-      <!-- Mødesikkerhed & Tastaturgenveje Info -->
-      <div class="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2 text-[11px] text-slate-400">
-        <div class="flex items-center gap-1.5 text-slate-200 font-semibold text-xs">
-          <Keyboard class="w-3.5 h-3.5 text-blue-400" />
-          <span>Hurtige Genveje</span>
-        </div>
-        <div class="grid grid-cols-2 gap-y-1 text-[11px]">
-          <span>Kopiér vagt/dag:</span>
-          <kbd class="justify-self-end px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl + C</kbd>
-          <span>Klip begivenhed:</span>
-          <kbd class="justify-self-end px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl + X</kbd>
-          <span>Indsæt på valgt dag:</span>
-          <kbd class="justify-self-end px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl + V</kbd>
-          <span>Fortryd handling:</span>
-          <kbd class="justify-self-end px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl + Z</kbd>
-          <span>Slet til papirkurv:</span>
-          <kbd class="justify-self-end px-1.5 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Delete</kbd>
-        </div>
-        <div class="pt-1.5 border-t border-slate-800/80 flex items-start gap-1.5 text-[10px] text-slate-400">
-          <ShieldCheck class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-          <span>
-            <strong>Mødesikkerhed aktiv:</strong> Møder med inviterede deltagere spærres automatisk for <code class="text-slate-300">Ctrl+C</code>.
-          </span>
-        </div>
-      </div>
+      </template>
     </div>
 
-    <!-- Bund: Papirkurv (30 dage) & Browser Notifikationer -->
-    <div class="space-y-2 pt-4 border-t border-slate-800">
+    <!-- Bund: Del kalender, Papirkurv (30 dage) & Browser Notifikationer -->
+    <div v-if="!store.isPublicShareMode" class="space-y-2 pt-4 border-t border-slate-800">
+      <button
+        type="button"
+        class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-xs text-blue-300 font-semibold transition"
+        @click="store.openShareModal()"
+      >
+        <Share2 class="w-4 h-4" />
+        Del kalender (Offentligt link)
+      </button>
+
       <button
         type="button"
         class="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-800/70 hover:bg-slate-800 border border-slate-700/70 text-xs text-slate-200 transition"
@@ -456,7 +494,7 @@ function removeSingleClipboardEvent(evId: string) {
       <button
         v-if="notifPermission !== 'granted'"
         type="button"
-        class="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-[11px] text-blue-300 transition"
+        class="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-700/60 text-[11px] text-slate-300 transition"
         @click="enableNotifications"
       >
         <Bell class="w-3.5 h-3.5" />

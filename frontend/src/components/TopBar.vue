@@ -10,9 +10,10 @@ import {
   Wifi,
   WifiOff,
   Plus,
-  Server,
-  X,
-  AlertTriangle
+  Share2,
+  LogOut,
+  Lock,
+  X
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../stores/calendarStore';
 import type { CalendarEvent } from '../types/calendar';
@@ -68,18 +69,22 @@ function formatShortDateTime(ev: CalendarEvent): string {
         </div>
         <div>
           <div class="font-bold text-slate-100 leading-tight tracking-tight flex items-center gap-2">
-            DAV-Sync Cal
+            {{ store.isPublicShareMode ? (store.session?.shareLabel || 'Delt Kalender') : 'DAV-Sync Cal' }}
             <span
-              class="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border"
-              :class="store.session?.mode === 'CALDAV'
-                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                : 'bg-amber-500/15 text-amber-300 border-amber-500/30'"
+              v-if="store.isPublicShareMode"
+              class="inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-300 border-amber-500/30"
             >
-              {{ store.session?.mode === 'CALDAV' ? 'Mailcow Live' : 'Demo / Mock' }}
+              <Lock class="w-2.5 h-2.5" /> Kun visning (Delt link)
+            </span>
+            <span
+              v-else
+              class="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+            >
+              Mailcow Live
             </span>
           </div>
           <p class="text-[11px] text-slate-400 hidden sm:block">
-            Tastatur-venlig SOGo &amp; CalDAV Webkalender
+            {{ store.isPublicShareMode ? `Delt af ${store.session?.username}` : store.session?.username }}
           </p>
         </div>
       </div>
@@ -126,7 +131,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
         <input
           v-model="store.searchQuery"
           type="text"
-          placeholder="Lyn-søg i lokalt indeks (titel, lokation, deltagere)..."
+          placeholder="Lyn-søg i kalenderen (titel, lokation)..."
           class="w-full pl-9 pr-8 py-1.5 text-sm bg-slate-950/90 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
           @focus="isSearchFocused = true"
           @blur="setTimeout(() => (isSearchFocused = false), 180)"
@@ -179,20 +184,11 @@ function formatShortDateTime(ev: CalendarEvent): string {
       </div>
     </div>
 
-    <!-- Højre: Kollisioner, Undo (Ctrl+Z), Visningsskift, Sync & Ny begivenhed -->
+    <!-- Højre: Undo (Ctrl+Z), Visningsskift, Del kalender, Sync, Log ud & Ny begivenhed -->
     <div class="flex items-center gap-2">
-      <!-- Kollisions-indikator -->
-      <div
-        v-if="store.collisionEventIds.size > 0"
-        class="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-medium"
-        title="Der er overlappende begivenheder på tværs af dine synlige kalendere"
-      >
-        <AlertTriangle class="w-3.5 h-3.5 text-amber-400 shrink-0" />
-        <span>{{ store.collisionEventIds.size }} kollisioner</span>
-      </div>
-
-      <!-- Fortryd (Ctrl+Z) -->
+      <!-- Fortryd (Ctrl+Z) - kun når logget ind -->
       <button
+        v-if="!store.isPublicShareMode"
         type="button"
         :disabled="store.undoStack.length === 0"
         class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
@@ -237,11 +233,23 @@ function formatShortDateTime(ev: CalendarEvent): string {
         </button>
       </div>
 
+      <!-- Del kalender via offentligt link (kun når logget ind) -->
+      <button
+        v-if="!store.isPublicShareMode"
+        type="button"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+        title="Del kalender med 3. part via offentligt Read-Only link"
+        @click="store.openShareModal()"
+      >
+        <Share2 class="w-3.5 h-3.5 text-blue-400" />
+        <span class="hidden xl:inline">Del kalender</span>
+      </button>
+
       <!-- Offline / Online & Sync -->
       <button
         type="button"
         class="p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 transition flex items-center gap-1.5 text-xs"
-        :title="store.isOnline ? 'Online — Klik for at synkronisere nu' : 'Offline — Ændringer gemmes i kø i IndexedDB'"
+        :title="store.isOnline ? 'Online — Klik for at opdatere nu' : 'Offline — Ændringer gemmes i kø i IndexedDB'"
         @click="store.syncWithServer(false)"
       >
         <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin text-blue-400': store.isSyncing }" />
@@ -255,18 +263,20 @@ function formatShortDateTime(ev: CalendarEvent): string {
         </span>
       </button>
 
-      <!-- Server / Login indstillinger -->
+      <!-- Log ud (kun når logget ind) -->
       <button
+        v-if="!store.isPublicShareMode"
         type="button"
-        class="p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-        title="Mailcow / SOGo Server & Login"
-        @click="store.isLoginModalOpen = true"
+        class="p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-rose-500/20 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 transition"
+        title="Log ud af Mailcow"
+        @click="store.logout()"
       >
-        <Server class="w-4 h-4" />
+        <LogOut class="w-4 h-4" />
       </button>
 
-      <!-- Ny begivenhed -->
+      <!-- Ny begivenhed (kun når logget ind) -->
       <button
+        v-if="!store.isPublicShareMode"
         type="button"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-sm transition"
         @click="store.openCreateEventModal()"

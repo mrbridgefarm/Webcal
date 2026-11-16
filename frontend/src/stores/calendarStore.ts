@@ -1,15 +1,19 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { db, purgeExpiredTrash } from '../db/database';
-import { getDemoCalendars, getDemoEvents } from '../services/mockCaldav';
 import {
+  apiGetServerConfig,
   apiLoginCalDav,
   apiSyncCalDav,
   apiSaveEvent,
   apiDeleteEvent,
   apiUpdateRsvp,
   apiCreateCalendar,
-  apiDeleteCalendar
+  apiDeleteCalendar,
+  apiListShares,
+  apiCreateShare,
+  apiDeleteShare,
+  apiFetchPublicShare
 } from '../services/apiClient';
 import { startReminderWatcher } from '../services/notifications';
 import type {
@@ -21,10 +25,11 @@ import type {
   UndoAction,
   ClipboardState,
   ContextMenuState,
-  RsvpStatus
+  RsvpStatus,
+  PublicShareLink
 } from '../types/calendar';
 
-const SESSION_STORAGE_KEY = 'dav_sync_cal_session_v1';
+const SESSION_STORAGE_KEY = 'dav_sync_cal_session_v2';
 const COLOR_OVERRIDE_KEY = 'dav_sync_cal_color_overrides_v1';
 const HIDDEN_CAL_KEY = 'dav_sync_cal_hidden_calendars_v1';
 
@@ -45,8 +50,8 @@ export interface ToastMessage {
 }
 
 /**
- * Sikker dyb kloning der fjerner alle Vue 3 Reactive Proxies (også indlejrede arrays som attendees),
- * så hverken kloning eller IndexedDB (Dexie) nogensinde kaster DataCloneError.
+ * Sikker dyb kloning der fjerner alle Vue 3 Reactive Proxies,
+ * så hverken kloning eller IndexedDB (Dexie) kaster DataCloneError.
  */
 export function clonePlain<T>(obj: T): T {
   if (obj === null || obj === undefined) return obj;
@@ -54,8 +59,7 @@ export function clonePlain<T>(obj: T): T {
 }
 
 /**
- * Genererer en RFC4122 v4 UUID, som også virker over almindelig HTTP (http://<vm-ip>:3000),
- * hvor browserens window.crypto.randomUUID() ellers er deaktiveret pga. manglende HTTPS.
+ * Genererer en RFC4122 v4 UUID, som også virker over almindelig HTTP (http://<vm-ip>:3000).
  */
 export function generateId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -78,11 +82,14 @@ export function generateId(): string {
 
 export const useCalendarStore = defineStore('calendar', () => {
   // --- State ---
+  const defaultServerUrl = ref<string>('');
   const session = ref<AuthSession | null>(null);
   const calendars = ref<CalendarSource[]>([]);
   const events = ref<CalendarEvent[]>([]);
   const trashItems = ref<TrashItem[]>([]);
   const syncQueue = ref<SyncQueueItem[]>([]);
+  const shares = ref<PublicShareLink[]>([]);
+  const publicShareError = ref<string>('');
 
   const isOnline = ref<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const isSyncing = ref<boolean>(false);
@@ -118,12 +125,21 @@ export const useCalendarStore = defineStore('calendar', () => {
   });
   const isLoginModalOpen = ref<boolean>(false);
   const isTrashModalOpen = ref<boolean>(false);
+  const isShareModalOpen = ref<boolean>(false);
+  const preselectedShareCalendarId = ref<string>('');
   const editingEvent = ref<CalendarEvent | null>(null);
   const isEventModalOpen = ref<boolean>(false);
   const toasts = ref<ToastMessage[]>([]);
+
   let isFlushing = false;
   let flushRequested = false;
   const hiddenCalendarIds = ref<string[]>(loadHiddenCalendarIds());
+
+  // --- Computed Auth & Mode ---
+  const isPublicShareMode = computed(() => session.value?.mode === 'PUBLIC_SHARE');
+  const isAuthenticated = computed(
+    () => Boolean(session.value && (session.value.mode === 'CALDAV' || session.value.mode === 'PUBLIC_SHARE'))
+  );
 
   // --- Helpers ---
   function notify(
@@ -161,6 +177,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   function isCalendarReadOnly(calId: string): boolean {
+    if (isPublicShareMode.value) return true;
     const cal = getCalendarById(calId);
     return Boolean(cal?.readOnly);
   }
@@ -192,7 +209,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   );
 
   const writableCalendars = computed(() =>
-    calendars.value.filter((c) => !c.readOnly)
+    isPublicShareMode.value ? [] : calendars.value.filter((c) => !c.readOnly)
   );
 
   const defaultWritableCalendar = computed<CalendarSource | undefined>(() => {
@@ -212,7 +229,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   );
 
   /**
-   * Øjeblikkelig lokal søgning mod det lokale indeks i browseren (millisekund-respons).
+   * Øjeblikkelig lokal søgning mod det lokale indeks i browseren.
    */
   const searchResults = computed(() => {
     const q = searchQuery.value.trim().toLowerCase();
@@ -230,59 +247,65 @@ export const useCalendarStore = defineStore('calendar', () => {
       .slice(0, 25);
   });
 
-  /**
-   * Kollisions-detektion på tværs af alle synlige kalendere (ignorerer heldagsbegivenheder).
-   */
-  const collisionEventIds = computed(() => {
-    const colliding = new Set<string>();
-    const timed = visibleEvents.value
-      .filter((ev) => !ev.allDay)
-      .map((ev) => ({
-        id: ev.id,
-        startMs: new Date(ev.start).getTime(),
-        endMs: new Date(ev.end).getTime()
-      }))
-      .filter((ev) => !Number.isNaN(ev.startMs) && !Number.isNaN(ev.endMs) && ev.endMs > ev.startMs)
-      .sort((a, b) => a.startMs - b.startMs);
-
-    for (let i = 0; i < timed.length; i++) {
-      for (let j = i + 1; j < timed.length; j++) {
-        if (timed[j].startMs < timed[i].endMs) {
-          colliding.add(timed[i].id);
-          colliding.add(timed[j].id);
-        } else {
-          break;
-        }
-      }
-    }
-    return colliding;
-  });
-
-  // --- Initialisering & Offline/Online lyttere ---
+  // --- Initialisering ---
   async function initStore() {
     window.addEventListener('online', () => {
       isOnline.value = true;
-      notify('Forbindelse genoprettet', 'Synkroniserer offline-kø i baggrunden...', 'success');
-      void flushSyncQueue();
+      if (session.value?.mode === 'CALDAV') {
+        notify('Forbindelse genoprettet', 'Synkroniserer offline-kø i baggrunden...', 'success');
+        void flushSyncQueue();
+      }
     });
 
     window.addEventListener('offline', () => {
       isOnline.value = false;
-      notify('Offline-tilstand aktiv', 'Alle ændringer gemmes i IndexedDB og synkroniseres automatisk senere.', 'warning');
+      if (session.value?.mode === 'CALDAV') {
+        notify('Offline-tilstand aktiv', 'Alle ændringer gemmes i IndexedDB og synkroniseres automatisk senere.', 'warning');
+      }
     });
 
-    await purgeExpiredTrash();
-    trashItems.value = await db.trash.orderBy('deletedAt').reverse().toArray();
-    syncQueue.value = await db.syncQueue.toArray();
+    // 1. Tjek om brugeren åbner et offentligt delingslink (?share=<token>)
+    const urlParams = new URLSearchParams(window.location.search);
+    const shareToken = urlParams.get('share')?.trim();
+    if (shareToken) {
+      await loadPublicSharedCalendar(shareToken);
+      return;
+    }
 
+    // 2. Hent serverens DEFAULT_CALDAV_URL fra .env
+    const cfg = await apiGetServerConfig();
+    defaultServerUrl.value = cfg.defaultServerUrl || '';
+
+    // 3. Tjek gemt Mailcow-session
     try {
+      localStorage.removeItem('dav_sync_cal_session_v1'); // Fjern evt. gammel demo-session
       const savedSession = localStorage.getItem(SESSION_STORAGE_KEY);
       if (savedSession) {
-        session.value = JSON.parse(savedSession);
+        const parsed = JSON.parse(savedSession) as AuthSession;
+        if (parsed && parsed.mode === 'CALDAV' && parsed.username && parsed.password) {
+          session.value = parsed;
+        }
       }
     } catch {
       session.value = null;
     }
+
+    if (!session.value) {
+      // Ingen aktiv Mailcow-session -> ryd eventuelle gamle demo-data og vis login-skærm!
+      await db.transaction('rw', db.calendars, db.events, db.syncQueue, async () => {
+        await db.calendars.clear();
+        await db.events.clear();
+        await db.syncQueue.clear();
+      });
+      calendars.value = [];
+      events.value = [];
+      isLoginModalOpen.value = true;
+      return;
+    }
+
+    await purgeExpiredTrash();
+    trashItems.value = await db.trash.orderBy('deletedAt').reverse().toArray();
+    syncQueue.value = await db.syncQueue.toArray();
 
     const storedCalendars = await db.calendars.toArray();
     const storedEvents = await db.events.toArray();
@@ -297,14 +320,44 @@ export const useCalendarStore = defineStore('calendar', () => {
       ) {
         activeTargetCalendarId.value = writableCalendars.value[0].id;
       }
-    } else {
-      await activateDemoMode(false);
     }
 
     startReminderWatcher(() => visibleEvents.value);
 
-    if (session.value?.mode === 'CALDAV' && isOnline.value) {
+    if (isOnline.value) {
       void flushSyncQueue().then(() => syncWithServer(true));
+    }
+  }
+
+  /**
+   * Indlæser en offentligt delt kalender via ?share=<token> uden krav om login (100% Read-Only).
+   */
+  async function loadPublicSharedCalendar(token: string) {
+    isSyncing.value = true;
+    publicShareError.value = '';
+    try {
+      const res = await apiFetchPublicShare(token);
+      session.value = {
+        mode: 'PUBLIC_SHARE',
+        serverUrl: '',
+        username: res.owner,
+        shareToken: token,
+        shareLabel: res.label,
+        connectedAt: new Date().toISOString()
+      };
+      calendars.value = res.calendars.map((c) => ({
+        ...c,
+        readOnly: true,
+        isShared: true,
+        visible: true
+      }));
+      events.value = res.events;
+      lastSyncedAt.value = res.syncedAt;
+      isLoginModalOpen.value = false;
+    } catch (err: any) {
+      publicShareError.value = err?.message || 'Kunne ikke indlæse den delte kalender.';
+    } finally {
+      isSyncing.value = false;
     }
   }
 
@@ -321,47 +374,12 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
   }
 
-  // --- Login & Demo Mode ---
-  async function activateDemoMode(resetData = true) {
-    const demoSession: AuthSession = {
-      mode: 'DEMO',
-      serverUrl: 'https://mail.demo.dk/SOGo/dav/',
-      username: 'carsten@demo.dk',
-      connectedAt: new Date().toISOString()
-    };
-    session.value = demoSession;
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(demoSession));
-
-    if (resetData || (await db.calendars.count()) === 0) {
-      const demoCals = clonePlain(getDemoCalendars());
-      applyColorOverridesToCalendars(demoCals);
-      const demoEvs = clonePlain(getDemoEvents());
-
-      await db.transaction('rw', db.calendars, db.events, db.syncQueue, async () => {
-        await db.calendars.clear();
-        await db.events.clear();
-        await db.syncQueue.clear();
-        await db.calendars.bulkPut(demoCals);
-        await db.events.bulkPut(demoEvs);
-      });
-
-      calendars.value = demoCals;
-      events.value = demoEvs;
-      syncQueue.value = [];
-    }
-
-    if (writableCalendars.value[0]) {
-      activeTargetCalendarId.value = writableCalendars.value[0].id;
-    }
-    lastSyncedAt.value = new Date().toISOString();
-    isLoginModalOpen.value = false;
-    notify('Demo/Mock-tilstand aktiv', 'Indlæste 3 SOGo-kalendere (inkl. delt Read-Only og mødeinvitation).', 'success');
-  }
-
+  // --- Login & Logout mod Mailcow ---
   async function loginToMailcow(serverUrl: string, username: string, password: string) {
     isSyncing.value = true;
     try {
-      const loginRes = await apiLoginCalDav(serverUrl, username, password);
+      const targetUrl = serverUrl.trim() || defaultServerUrl.value;
+      const loginRes = await apiLoginCalDav(targetUrl, username, password);
       const newSession: AuthSession = {
         mode: 'CALDAV',
         serverUrl: loginRes.serverUrl,
@@ -374,18 +392,39 @@ export const useCalendarStore = defineStore('calendar', () => {
 
       await syncWithServer(false);
       isLoginModalOpen.value = false;
+      startReminderWatcher(() => visibleEvents.value);
       notify('Forbundet til Mailcow / SOGo', `Logget ind som ${loginRes.username}`, 'success');
     } finally {
       isSyncing.value = false;
     }
   }
 
+  async function logout() {
+    session.value = null;
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    clearClipboard();
+    selectedEventIds.value = [];
+    undoStack.value = [];
+    calendars.value = [];
+    events.value = [];
+    shares.value = [];
+
+    await db.transaction('rw', db.calendars, db.events, db.syncQueue, async () => {
+      await db.calendars.clear();
+      await db.events.clear();
+      await db.syncQueue.clear();
+    });
+
+    isLoginModalOpen.value = true;
+  }
+
   async function syncWithServer(silent = false) {
     if (!session.value) return;
-    if (session.value.mode === 'DEMO') {
-      lastSyncedAt.value = new Date().toISOString();
-      if (!silent) {
-        notify('Lokal Demo-synkronisering', 'Alle ændringer er gemt i IndexedDB.', 'info');
+
+    if (session.value.mode === 'PUBLIC_SHARE' && session.value.shareToken) {
+      await loadPublicSharedCalendar(session.value.shareToken);
+      if (!silent && !publicShareError.value) {
+        notify('Delt kalender opdateret', 'Hentede nyeste begivenheder.', 'success');
       }
       return;
     }
@@ -415,7 +454,6 @@ export const useCalendarStore = defineStore('calendar', () => {
       applyColorOverridesToCalendars(mergedCalendars);
       const serverEvents = clonePlain(res.events).filter((e) => !hiddenSet.has(e.calendarId));
 
-      // Behold lokale ændringer der endnu ikke er nået serveren (så indsatte aftaler ikke forsvinder)
       const pendingQueue = await db.syncQueue.toArray();
       const pendingIds = new Set(
         pendingQueue.filter((q) => q.action !== 'DELETE').map((q) => q.eventId)
@@ -464,6 +502,62 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
   }
 
+  // --- Offentlig Deling (Share Links til 3. part) ---
+  function openShareModal(calendarId?: string) {
+    if (isPublicShareMode.value) return;
+    preselectedShareCalendarId.value = calendarId || '';
+    isShareModalOpen.value = true;
+    void loadShares();
+  }
+
+  async function loadShares() {
+    if (session.value?.mode !== 'CALDAV') return;
+    try {
+      shares.value = await apiListShares(session.value);
+    } catch (err) {
+      console.warn('Kunne ikke hente delingslinks:', err);
+    }
+  }
+
+  async function createShare(params: {
+    label: string;
+    calendarIds: string[];
+    hideDetails: boolean;
+  }): Promise<PublicShareLink | null> {
+    if (session.value?.mode !== 'CALDAV') return null;
+    const selectedCals = calendars.value.filter((c) => params.calendarIds.includes(c.id));
+    if (selectedCals.length === 0) {
+      notify('Vælg kalender', 'Vælg mindst én kalender, som skal deles.', 'warning');
+      return null;
+    }
+
+    try {
+      const created = await apiCreateShare(session.value, {
+        label: params.label,
+        calendarUrls: selectedCals.map((c) => c.url),
+        calendarNames: selectedCals.map((c) => c.name),
+        hideDetails: params.hideDetails
+      });
+      shares.value.unshift(created);
+      notify('Delingslink oprettet', 'Du kan nu kopiere linket og sende det til 3. part.', 'success');
+      return created;
+    } catch (err: any) {
+      notify('Kunne ikke oprette delingslink', err?.message || String(err), 'error');
+      return null;
+    }
+  }
+
+  async function revokeShare(token: string) {
+    if (session.value?.mode !== 'CALDAV') return;
+    try {
+      await apiDeleteShare(session.value, token);
+      shares.value = shares.value.filter((s) => s.token !== token);
+      notify('Delingslink slettet', 'Linket er nu deaktiveret og kan ikke længere tilgås.', 'info');
+    } catch (err: any) {
+      notify('Fejl ved sletning af link', err?.message || String(err), 'error');
+    }
+  }
+
   // --- Offline Sync Queue ---
   async function enqueueSync(item: Omit<SyncQueueItem, 'id' | 'createdAt'>) {
     if (session.value?.mode !== 'CALDAV') return;
@@ -494,7 +588,6 @@ export const useCalendarStore = defineStore('calendar', () => {
       for (const item of queue) {
         try {
           if (item.action === 'UPSERT' && item.payload.event) {
-            // Brug altid nyeste lokale version (fx caldavUrl fra en tidligere oprettelse)
             const latestLocal = events.value.find((e) => e.id === item.eventId);
             const payloadEvent = clonePlain({
               ...item.payload.event,
@@ -527,7 +620,6 @@ export const useCalendarStore = defineStore('calendar', () => {
         } catch (err: any) {
           console.warn('Synkronisering af ændring fejlede:', err);
           const msg = String(err?.message || err);
-          // Netværksfejl -> prøv igen senere. Serverafvisning -> vis fejl og drop elementet, så køen ikke låser.
           const isNetworkError = err instanceof TypeError || /Failed to fetch|NetworkError/i.test(msg);
           if (isNetworkError) {
             notify('Ændring venter på forbindelse', 'Gemmes lokalt og sendes til Mailcow, når serveren kan nås.', 'warning');
@@ -555,7 +647,9 @@ export const useCalendarStore = defineStore('calendar', () => {
     const cal = getCalendarById(calId);
     if (!cal) return;
     cal.visible = !cal.visible;
-    await db.calendars.put(clonePlain(cal));
+    if (!isPublicShareMode.value) {
+      await db.calendars.put(clonePlain(cal));
+    }
   }
 
   async function setCalendarColorOverride(calId: string, newColor: string | null) {
@@ -572,7 +666,9 @@ export const useCalendarStore = defineStore('calendar', () => {
       cal.color = cal.serverColor;
     }
     saveColorOverrides(overrides);
-    await db.calendars.put(clonePlain(cal));
+    if (!isPublicShareMode.value) {
+      await db.calendars.put(clonePlain(cal));
+    }
   }
 
   // --- CRUD på Begivenheder + Undo (Ctrl+Z) + Papirkurv ---
@@ -589,6 +685,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   async function triggerUndo() {
+    if (isPublicShareMode.value) return;
     const last = undoStack.value.pop();
     if (!last) {
       notify('Intet at fortryde', 'Fortryd-historikken er tom.', 'info');
@@ -602,10 +699,10 @@ export const useCalendarStore = defineStore('calendar', () => {
     eventInput: Partial<CalendarEvent> & { title: string; start: string; end: string; calendarId: string },
     recordUndo = true
   ): Promise<CalendarEvent | null> {
-    if (isCalendarReadOnly(eventInput.calendarId)) {
+    if (isPublicShareMode.value || isCalendarReadOnly(eventInput.calendarId)) {
       notify(
         'Skrivebeskyttet kalender (Read-Only)',
-        'Du kan ikke oprette eller redigere begivenheder i en delt Read-Only kalender.',
+        'Du kan ikke oprette eller redigere begivenheder i en skrivebeskyttet kalender.',
         'error'
       );
       return null;
@@ -677,6 +774,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   async function deleteEventsByIds(ids: string[], recordUndo = true) {
+    if (isPublicShareMode.value) return;
     const toDelete = events.value.filter((e) => ids.includes(e.id));
     if (toDelete.length === 0) return;
 
@@ -744,6 +842,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   async function restoreFromTrash(trashId: string) {
+    if (isPublicShareMode.value) return;
     const item = trashItems.value.find((t) => t.id === trashId);
     if (!item) return;
 
@@ -781,6 +880,8 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   function copyOrCutSelection(mode: 'COPY' | 'CUT', explicitEvents?: CalendarEvent[]) {
+    if (isPublicShareMode.value) return;
+
     let candidates: CalendarEvent[] = [];
 
     if (explicitEvents && explicitEvents.length > 0) {
@@ -802,7 +903,6 @@ export const useCalendarStore = defineStore('calendar', () => {
       return;
     }
 
-    // Mødesikkerhed / Spam-beskyttelse: Fjern begivenheder med eksterne mødedeltagere
     const blockedMeetings = candidates.filter((e) => hasInvitedAttendees(e));
     const allowed = candidates.filter((e) => !hasInvitedAttendees(e));
 
@@ -862,6 +962,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   async function pasteToDate(targetDateInput?: string) {
+    if (isPublicShareMode.value) return;
     if (!clipboard.value.events.length || !clipboard.value.sourceAnchorDate) {
       notify('Udklipsholderen er tom', 'Kopiér først en begivenhed med Ctrl+C eller højreklik.', 'warning');
       return;
@@ -929,7 +1030,6 @@ export const useCalendarStore = defineStore('calendar', () => {
         newEndIso = newEndDt.toISOString();
       }
 
-      // Bemærk: Ved kopiering nulstilles uid, caldavUrl, etag og rawIcs, så SOGo opretter en helt ny VEVENT!
       const created = await saveEvent(
         {
           calendarId: targetCalId,
@@ -986,15 +1086,16 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   // --- RSVP på Mødeinvitationer ---
   async function respondToInvite(eventId: string, partstat: RsvpStatus) {
+    if (isPublicShareMode.value) return;
     const ev = events.value.find((e) => e.id === eventId);
     if (!ev) return;
 
-    const userEmail = (session.value?.username || 'carsten@demo.dk').toLowerCase().trim();
+    const userEmail = (session.value?.username || '').toLowerCase().trim();
     const updatedAttendees = (ev.attendees || []).map((a) =>
       a.email.toLowerCase().trim() === userEmail ? { ...a, partstat } : clonePlain(a)
     );
 
-    if (!updatedAttendees.some((a) => a.email.toLowerCase().trim() === userEmail)) {
+    if (userEmail && !updatedAttendees.some((a) => a.email.toLowerCase().trim() === userEmail)) {
       updatedAttendees.push({
         email: userEmail,
         name: userEmail.split('@')[0],
@@ -1041,6 +1142,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   async function createCalendar(name: string, color: string, calendarUrl?: string) {
+    if (isPublicShareMode.value || session.value?.mode !== 'CALDAV') return null;
     const trimmed = name.trim();
     const trimmedUrl = calendarUrl?.trim() || '';
     if (!trimmed && !trimmedUrl) {
@@ -1048,36 +1150,23 @@ export const useCalendarStore = defineStore('calendar', () => {
       return null;
     }
 
+    if (!isOnline.value) {
+      notify('Offline', 'Du skal være online for at oprette eller tilføje en kalender på Mailcow.', 'warning');
+      return null;
+    }
+
     let newCal: CalendarSource;
-    if (session.value?.mode === 'CALDAV') {
-      if (!isOnline.value) {
-        notify('Offline', 'Du skal være online for at oprette eller tilføje en kalender på Mailcow.', 'warning');
-        return null;
-      }
-      try {
-        const created = await apiCreateCalendar(
-          session.value,
-          trimmed || 'SOGo Kalender',
-          color,
-          trimmedUrl || undefined
-        );
-        newCal = clonePlain({ ...created, visible: true });
-      } catch (err: any) {
-        notify('Kunne ikke oprette/tilføje kalender', err?.message || String(err), 'error', 9000);
-        return null;
-      }
-    } else {
-      const id = trimmedUrl || `demo-${generateId()}`;
-      newCal = {
-        id,
-        url: trimmedUrl || `https://mail.demo.dk/SOGo/dav/carsten/Calendar/${id}/`,
-        name: trimmed || 'Ny Kalender',
+    try {
+      const created = await apiCreateCalendar(
+        session.value,
+        trimmed || 'SOGo Kalender',
         color,
-        serverColor: color,
-        readOnly: false,
-        isShared: false,
-        visible: true
-      };
+        trimmedUrl || undefined
+      );
+      newCal = clonePlain({ ...created, visible: true });
+    } catch (err: any) {
+      notify('Kunne ikke oprette/tilføje kalender', err?.message || String(err), 'error', 9000);
+      return null;
     }
 
     hiddenCalendarIds.value = hiddenCalendarIds.value.filter((id) => id !== newCal.id);
@@ -1095,13 +1184,14 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
     notify('Kalender tilføjet', `"${newCal.name}" er klar.`, 'success');
 
-    if (session.value?.mode === 'CALDAV' && trimmedUrl) {
+    if (trimmedUrl) {
       void syncWithServer(true);
     }
     return newCal;
   }
 
   async function deleteCalendar(calId: string) {
+    if (isPublicShareMode.value || session.value?.mode !== 'CALDAV') return;
     const cal = getCalendarById(calId);
     if (!cal) return;
     if (cal.readOnly || cal.isShared) {
@@ -1109,13 +1199,11 @@ export const useCalendarStore = defineStore('calendar', () => {
       return;
     }
 
-    if (session.value?.mode === 'CALDAV') {
-      try {
-        await apiDeleteCalendar(session.value, cal.url);
-      } catch (err: any) {
-        notify('Kunne ikke slette kalender', err?.message || String(err), 'error', 9000);
-        return;
-      }
+    try {
+      await apiDeleteCalendar(session.value, cal.url);
+    } catch (err: any) {
+      notify('Kunne ikke slette kalender', err?.message || String(err), 'error', 9000);
+      return;
     }
 
     await removeCalendarLocally(calId);
@@ -1155,6 +1243,7 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   // --- Kontekstmenu & Modal hjælpere ---
   function openContextMenu(payload: Omit<ContextMenuState, 'visible'>) {
+    if (isPublicShareMode.value) return;
     const menuWidth = 260;
     const menuHeight = 320;
     const x = Math.min(payload.x, window.innerWidth - menuWidth - 12);
@@ -1174,6 +1263,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   function openCreateEventModal(dateStr?: string, allDay = false) {
+    if (isPublicShareMode.value) return;
     const cal = defaultWritableCalendar.value;
     if (!cal) {
       notify('Ingen skrivbar kalender', 'Alle aktive kalendere er Read-Only.', 'error');
@@ -1222,11 +1312,14 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   return {
     // State
+    defaultServerUrl,
     session,
     calendars,
     events,
     trashItems,
     syncQueue,
+    shares,
+    publicShareError,
     isOnline,
     isSyncing,
     lastSyncedAt,
@@ -1240,18 +1333,22 @@ export const useCalendarStore = defineStore('calendar', () => {
     contextMenu,
     isLoginModalOpen,
     isTrashModalOpen,
+    isShareModalOpen,
+    preselectedShareCalendarId,
     editingEvent,
     isEventModalOpen,
     toasts,
+    hiddenCalendarIds,
 
     // Computed
+    isPublicShareMode,
+    isAuthenticated,
     visibleCalendars: computed(() => calendars.value.filter((c) => c.visible)),
     writableCalendars,
     defaultWritableCalendar,
     visibleEvents,
     clipboardEventIds,
     searchResults,
-    collisionEventIds,
 
     // Actions & Helpers
     initStore,
@@ -1260,9 +1357,13 @@ export const useCalendarStore = defineStore('calendar', () => {
     getCalendarById,
     isCalendarReadOnly,
     hasInvitedAttendees,
-    activateDemoMode,
     loginToMailcow,
+    logout,
     syncWithServer,
+    openShareModal,
+    loadShares,
+    createShare,
+    revokeShare,
     toggleCalendarVisibility,
     setCalendarColorOverride,
     saveEvent,
@@ -1279,7 +1380,6 @@ export const useCalendarStore = defineStore('calendar', () => {
     closeContextMenu,
     openCreateEventModal,
     openEditEventModal,
-    hiddenCalendarIds,
     createCalendar,
     deleteCalendar,
     hideCalendar,

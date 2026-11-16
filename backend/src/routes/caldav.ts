@@ -11,6 +11,12 @@ import {
   deleteCalDavCalendar
 } from '../services/davClient.js';
 import { CalendarEventDTO, AttendeeDTO } from '../services/icalMapper.js';
+import {
+  listSharesForUser,
+  createShareLink,
+  deleteShareLink,
+  resolveShareToken
+} from '../services/shareStore.js';
 
 export const caldavRouter = Router();
 
@@ -28,11 +34,22 @@ function extractCredentials(req: Request): CalDavCredentials {
   const password = req.body?.password || headerPass || '';
 
   if (!serverUrl || !username || !password) {
-    throw new Error('Manglende CalDAV login-oplysninger (Server URL, E-mail eller App-adgangskode).');
+    throw new Error('Manglende CalDAV login-oplysninger (Server URL, E-mail eller Adgangskode).');
   }
 
   return { serverUrl, username, password };
 }
+
+/**
+ * GET /api/caldav/config
+ * Returnerer serverens konfigurerede DEFAULT_CALDAV_URL fra .env / compose.yaml.
+ */
+caldavRouter.get('/config', (_req: Request, res: Response) => {
+  res.json({
+    ok: true,
+    defaultServerUrl: process.env.DEFAULT_CALDAV_URL || ''
+  });
+});
 
 /**
  * POST /api/caldav/login
@@ -201,6 +218,135 @@ caldavRouter.post('/rsvp', async (req: Request, res: Response) => {
     res.status(500).json({
       ok: false,
       error: err?.message || 'Kunne ikke opdatere mødesvar på CalDAV-serveren.'
+    });
+  }
+});
+
+/**
+ * GET /api/caldav/shares
+ * Henter alle aktive offentlige delingslinks for den indloggede bruger.
+ */
+caldavRouter.get('/shares', async (req: Request, res: Response) => {
+  try {
+    const creds = extractCredentials(req);
+    const shares = listSharesForUser(creds.username);
+    res.json({ ok: true, shares });
+  } catch (err: any) {
+    res.status(401).json({ ok: false, error: err?.message || 'Uautoriseret' });
+  }
+});
+
+/**
+ * POST /api/caldav/shares
+ * Opretter et offentligt Read-Only delingslink til én eller flere kalendere.
+ */
+caldavRouter.post('/shares', async (req: Request, res: Response) => {
+  try {
+    const creds = extractCredentials(req);
+    const label = String(req.body?.label || 'Delt kalender').trim();
+    const calendarUrls = Array.isArray(req.body?.calendarUrls) ? req.body.calendarUrls.map(String) : [];
+    const calendarNames = Array.isArray(req.body?.calendarNames) ? req.body.calendarNames.map(String) : [];
+    const hideDetails = Boolean(req.body?.hideDetails);
+
+    if (calendarUrls.length === 0) {
+      res.status(400).json({ ok: false, error: 'Vælg mindst én kalender at dele.' });
+      return;
+    }
+
+    const share = createShareLink({
+      creds,
+      label,
+      calendarUrls,
+      calendarNames,
+      hideDetails
+    });
+
+    res.json({ ok: true, share });
+  } catch (err: any) {
+    console.error('Fejl ved oprettelse af delingslink:', err?.message || err);
+    res.status(500).json({ ok: false, error: err?.message || 'Kunne ikke oprette delingslink.' });
+  }
+});
+
+/**
+ * DELETE /api/caldav/shares/:token
+ * Sletter / tilbagekalder et offentligt delingslink.
+ */
+caldavRouter.delete('/shares/:token', async (req: Request, res: Response) => {
+  try {
+    const creds = extractCredentials(req);
+    const token = String(req.params.token || '');
+    const deleted = deleteShareLink(creds.username, token);
+    res.json({ ok: true, deleted });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || 'Kunne ikke slette delingslink.' });
+  }
+});
+
+/**
+ * GET /api/caldav/public/:token
+ * Offentligt Read-Only endpoint (kræver IKKE login).
+ * Henter de delte kalendere og begivenheder til visning for 3. part med linket.
+ */
+caldavRouter.get('/public/:token', async (req: Request, res: Response) => {
+  try {
+    const token = String(req.params.token || '').trim();
+    const resolved = resolveShareToken(token);
+    if (!resolved) {
+      res.status(404).json({
+        ok: false,
+        error: 'Dette delingslink findes ikke eller er blevet tilbagekaldt af ejeren.'
+      });
+      return;
+    }
+
+    const { record, creds } = resolved;
+    const allCalendars = await fetchCalendars(creds);
+    const allowedSet = new Set(record.calendarUrls);
+
+    const sharedCalendars = allCalendars
+      .filter((c) => allowedSet.has(c.url) || allowedSet.has(c.id))
+      .map((c) => ({
+        ...c,
+        readOnly: true,
+        isShared: true,
+        owner: record.username
+      }));
+
+    const rawEvents = await fetchAllEvents(creds, sharedCalendars);
+
+    // Rens følsomme CalDAV-felter og anonymisér hvis hideDetails er valgt
+    const sanitizedEvents: CalendarEventDTO[] = rawEvents.map((ev) => ({
+      id: ev.id,
+      uid: ev.uid,
+      calendarId: ev.calendarId,
+      title: record.hideDetails ? 'Optaget' : ev.title,
+      start: ev.start,
+      end: ev.end,
+      allDay: ev.allDay,
+      description: record.hideDetails ? '' : ev.description,
+      location: record.hideDetails ? '' : ev.location,
+      videoUrl: record.hideDetails ? undefined : ev.videoUrl,
+      timezone: ev.timezone,
+      attendees: [],
+      organizer: undefined,
+      reminderMinutes: null
+    }));
+
+    res.json({
+      ok: true,
+      label: record.label,
+      owner: record.username,
+      hideDetails: record.hideDetails,
+      calendars: sharedCalendars,
+      events: sanitizedEvents,
+      syncedAt: new Date().toISOString()
+    });
+  } catch (err: any) {
+    console.error('Fejl ved hentning af offentligt delt kalender:', err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: 'Kunne ikke hente den delte kalender fra serveren.'
     });
   }
 });

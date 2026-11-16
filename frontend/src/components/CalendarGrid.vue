@@ -10,7 +10,7 @@ import type {
   EventDropArg
 } from '@fullcalendar/core';
 import type { DateClickArg, EventResizeDoneArg } from '@fullcalendar/interaction';
-import { Lock, Users, AlertTriangle, Video, Check, Copy, Scissors } from 'lucide-vue-next';
+import { Lock, Users, Video, Check, Copy, Scissors } from 'lucide-vue-next';
 import { useCalendarStore, toDateOnlyString } from '../stores/calendarStore';
 import type { CalendarEvent } from '../types/calendar';
 
@@ -30,8 +30,7 @@ const fcEvents = computed(() =>
     const isSelected = store.selectedEventIds.includes(ev.id);
     const isInClipboard = store.clipboardEventIds.has(ev.id);
     const clipboardMode = isInClipboard ? store.clipboard.mode : null;
-    const isCollision = store.collisionEventIds.has(ev.id);
-    const isReadOnly = Boolean(cal?.readOnly);
+    const isReadOnly = store.isPublicShareMode || Boolean(cal?.readOnly);
     const hasGuests = store.hasInvitedAttendees(ev);
 
     return {
@@ -48,14 +47,11 @@ const fcEvents = computed(() =>
         ? '#f8fafc'
         : isInClipboard
           ? '#34d399'
-          : isCollision
-            ? '#f59e0b'
-            : cal?.color || '#2563eb',
+          : cal?.color || '#2563eb',
       classNames: [
         isSelected ? 'dav-event-selected' : '',
         isInClipboard && clipboardMode === 'COPY' ? 'dav-event-copied' : '',
         isInClipboard && clipboardMode === 'CUT' ? 'dav-event-cut' : '',
-        isCollision ? 'dav-event-collision' : '',
         isReadOnly ? 'dav-event-readonly' : ''
       ].filter(Boolean),
       extendedProps: {
@@ -64,7 +60,6 @@ const fcEvents = computed(() =>
         isSelected,
         isInClipboard,
         clipboardMode,
-        isCollision,
         isReadOnly,
         hasGuests,
         calendarName: cal?.name || ''
@@ -73,9 +68,6 @@ const fcEvents = computed(() =>
   })
 );
 
-/**
- * Markerer visuelt den aktuelt valgte mål-dato (store.selectedDateStr) i FullCalendar DOM'en
- */
 function updateSelectedDayHighlight() {
   if (!gridContainerRef.value) return;
   const targetYmd = (store.selectedDateStr || '').slice(0, 10);
@@ -103,7 +95,8 @@ function handleDateClick(arg: DateClickArg) {
   store.selectedDateStr = clickedDateStr;
   store.selectedEventIds = [];
 
-  // Dobbeltklik på dato/tidsslot åbner "Ny begivenhed"-modal
+  if (store.isPublicShareMode) return;
+
   const now = Date.now();
   if (now - lastClickTime < 320 && lastClickedId === `date:${clickedDateStr}`) {
     store.openCreateEventModal(clickedDateStr, arg.allDay);
@@ -122,6 +115,12 @@ function handleEventClick(arg: EventClickArg) {
 
   store.selectedDateStr = toDateOnlyString(new Date(ev.start));
 
+  // I offentlig Read-Only delingstilstand åbner et klik blot detalje-visningen
+  if (store.isPublicShareMode) {
+    store.openEditEventModal(ev);
+    return;
+  }
+
   if (arg.jsEvent.ctrlKey || arg.jsEvent.metaKey || arg.jsEvent.shiftKey) {
     if (store.selectedEventIds.includes(ev.id)) {
       store.selectedEventIds = store.selectedEventIds.filter((id) => id !== ev.id);
@@ -133,7 +132,6 @@ function handleEventClick(arg: EventClickArg) {
 
   store.selectedEventIds = [ev.id];
 
-  // Dobbeltklik på begivenhed åbner redigeringsmodal
   const now = Date.now();
   if (now - lastClickTime < 350 && lastClickedId === `ev:${ev.id}`) {
     store.openEditEventModal(ev);
@@ -142,16 +140,12 @@ function handleEventClick(arg: EventClickArg) {
   lastClickedId = `ev:${ev.id}`;
 }
 
-/**
- * Delegated højrekliks-handler på hele kalendergitteret.
- * Virker 100% stabilt både på begivenheder, i "+ X flere"-popovers og på tomme datoer i Måned/Uge/Dag.
- */
 function handleGridContextMenu(e: MouseEvent) {
+  if (store.isPublicShareMode) return;
   e.preventDefault();
   const target = e.target as HTMLElement | null;
   if (!target) return;
 
-  // 1. Tjek om brugeren højreklikkede på en begivenhed
   const eventContentEl = target.closest<HTMLElement>('[data-dav-event-id]');
   if (eventContentEl) {
     const evId = eventContentEl.getAttribute('data-dav-event-id');
@@ -172,7 +166,6 @@ function handleGridContextMenu(e: MouseEvent) {
     }
   }
 
-  // 2. Ellers tjek hvilken dato-celle/kolonne der blev højreklikket på
   const dateEl = target.closest<HTMLElement>('[data-date]');
   const dateStr = dateEl?.getAttribute('data-date') || store.selectedDateStr;
   if (dateStr) {
@@ -195,7 +188,7 @@ async function handleEventDrop(arg: EventDropArg) {
     arg.revert();
     store.notify(
       'Skrivebeskyttet kalender (Read-Only)',
-      'Du kan ikke flytte begivenheder i en delt Read-Only kalender.',
+      'Du kan ikke flytte begivenheder i en skrivebeskyttet kalender.',
       'error'
     );
     return;
@@ -226,7 +219,7 @@ async function handleEventResize(arg: EventResizeDoneArg) {
     arg.revert();
     store.notify(
       'Skrivebeskyttet kalender (Read-Only)',
-      'Du kan ikke ændre varighed i en delt Read-Only kalender.',
+      'Du kan ikke ændre varighed i en skrivebeskyttet kalender.',
       'error'
     );
     return;
@@ -260,7 +253,7 @@ const calendarOptions = computed<CalendarOptions>(() => ({
   dayMaxEvents: 7,
   moreLinkText: (num: number) => `+ ${num} flere`,
   navLinks: false,
-  editable: true,
+  editable: !store.isPublicShareMode,
   selectable: false,
   nowIndicator: true,
   slotMinTime: '06:00:00',
@@ -359,7 +352,7 @@ defineExpose({
     @contextmenu="handleGridContextMenu"
   >
     <!-- Valgt mål-dato & markering i toppen af gitteret -->
-    <div class="mb-2 flex items-center justify-between text-xs px-1 text-slate-400">
+    <div v-if="!store.isPublicShareMode" class="mb-2 flex items-center justify-between text-xs px-1 text-slate-400">
       <div class="flex items-center gap-3 flex-wrap">
         <span>
           Aktiv mål-dato (<kbd class="px-1 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl+V</kbd>):
@@ -382,9 +375,6 @@ defineExpose({
         </span>
       </div>
       <div class="hidden xl:flex items-center gap-4 text-[11px]">
-        <span class="flex items-center gap-1 text-amber-300">
-          <AlertTriangle class="w-3.5 h-3.5" /> Kollision
-        </span>
         <span class="flex items-center gap-1 text-slate-300">
           <Users class="w-3.5 h-3.5 text-purple-300" /> Møde m/ deltagere (Ctrl+C låst)
         </span>
@@ -394,13 +384,16 @@ defineExpose({
       </div>
     </div>
 
-    <div class="h-[calc(100%-28px)] rounded-2xl overflow-hidden border border-slate-800 bg-slate-900/50 shadow-inner">
+    <div
+      :class="store.isPublicShareMode ? 'h-full' : 'h-[calc(100%-28px)]'"
+      class="rounded-2xl overflow-hidden border border-slate-800 bg-slate-900/50 shadow-inner"
+    >
       <FullCalendar ref="calendarRef" :options="calendarOptions">
         <template #eventContent="arg">
           <div
             :data-dav-event-id="arg.event.id"
             class="w-full px-1.5 py-0.5 flex items-center justify-between gap-1 overflow-hidden text-[11px] leading-tight cursor-pointer select-none"
-            :title="`${arg.event.title}${arg.event.extendedProps.isInClipboard ? ' (I UDKLIPSHOLDER)' : ''}${arg.event.extendedProps.isCollision ? ' (KOLLISION!)' : ''}${arg.event.extendedProps.hasGuests ? ' (Har mødedeltagere - Ctrl+C spærret)' : ''}`"
+            :title="`${arg.event.title}${arg.event.extendedProps.isInClipboard ? ' (I UDKLIPSHOLDER)' : ''}${arg.event.extendedProps.hasGuests ? ' (Har mødedeltagere - Ctrl+C spærret)' : ''}`"
           >
             <div class="flex items-center gap-1 min-w-0 truncate">
               <span
@@ -416,10 +409,6 @@ defineExpose({
             </div>
 
             <div class="flex items-center gap-0.5 shrink-0">
-              <AlertTriangle
-                v-if="arg.event.extendedProps.isCollision"
-                class="w-3 h-3 text-amber-300 drop-shadow"
-              />
               <Video
                 v-if="arg.event.extendedProps.rawEvent?.videoUrl"
                 class="w-3 h-3 text-sky-200"
@@ -429,7 +418,7 @@ defineExpose({
                 class="w-3 h-3 text-purple-200"
               />
               <Lock
-                v-if="arg.event.extendedProps.isReadOnly"
+                v-if="arg.event.extendedProps.isReadOnly && !store.isPublicShareMode"
                 class="w-3 h-3 text-amber-200"
               />
             </div>

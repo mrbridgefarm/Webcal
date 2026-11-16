@@ -12,6 +12,8 @@ services:
       - PORT=3000
       - DEFAULT_CALDAV_URL=${DEFAULT_CALDAV_URL:-}
       - ALLOW_INSECURE_TLS=${ALLOW_INSECURE_TLS:-false}
+    volumes:
+      - dav-sync-data:/app/data
     networks:
       - pangolin
     healthcheck:
@@ -20,6 +22,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+volumes:
+  dav-sync-data:
 
 networks:
   pangolin:

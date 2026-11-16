@@ -30,19 +30,23 @@ Traditionelle webkalendere kræver utallige museklik, når man skal planlægge v
 * **Fortryd med ét tryk (`Ctrl+Z`):** Alle oprettelser, redigeringer, træk-og-slip flytninger, indsættelser og sletninger lægges i en lokal historik-stak og kan fortrydes øjeblikkeligt.
 * **30-dages lokal papirkurv:** Slettede begivenheder gemmes i browserens IndexedDB i 30 dage med nedtælling og kan gendannes med et enkelt klik.
 
-### ⚡ 5. Øjeblikkelig Lokal Søgning & Kollisions-advarsler
-* **Millisekund-søgning:** Søgefeltet i topbaren filtrerer øjeblikkeligt mod det lokale indeks i browseren på tværs af titler, lokationer, beskrivelser og mødedeltagere.
-* **Kollisions-detektion:** Overlappende aftaler på tværs af dine synlige kalendere markeres automatisk med en gul advarselsramme (`⚠️`) og tælles i topbaren, så dobbeltbookinger opdages med det samme.
+### 🔗 5. Del Kalender med 3. Part (Offentligt Read-Only Link uden login)
+* **Del med ét klik:** Klik på **Del kalender** i topbaren eller ud for en enkelt kalender i sidepanelet for at generere et unikt offentligt delingslink (`https://<din-server>/?share=<token>`).
+* **100 % Read-Only uden login:** Når en 3. part åbner dit delingslink, kan de straks se kalenderen (Måned, Uge, Dag og søgning) uden at skulle logge ind — men alt er låst mod ændringer, oprettelser og sletninger.
+* **Valgfri anonymisering ("Optaget"):** Vælg om modtageren skal kunne se fulde aftaledetaljer, eller kun tidsrum markeret som *"Optaget"*. Du kan til enhver tid tilbagekalde/slette et delingslink med ét klik.
 
-### 📶 6. Offline Caching (PWA) & Baggrunds-synkronisering
+### ⚡ 6. Øjeblikkelig Lokal Søgning
+* **Millisekund-søgning:** Søgefeltet i topbaren filtrerer øjeblikkeligt mod det lokale indeks i browseren på tværs af titler, lokationer, beskrivelser og mødedeltagere.
+
+### 📶 7. Offline Caching (PWA) & Baggrunds-synkronisering
 * **100 % Offline læse- og skriveadgang:** Kalenderdata gemmes lokalt i **IndexedDB (`Dexie.js`)** kombineret med en **PWA Service Worker**.
 * **Automatisk Sync-kø:** Hvis internetforbindelsen eller Mailcow-serveren er utilgængelig, lægges ændringer i en lokal kø og skubbes automatisk til serveren, så snart forbindelsen er tilbage.
 
 ---
 
-## 🔗 Mailcow & SOGo CalDAV Kernemotor
+## 🔐 Mailcow & SOGo CalDAV Kernemotor
 
-* **Fleksibelt Login:** Log ind med din Mailcow e-mail og adgangskode / App-adgangskode. Understøtter både domæne (`post2ko.ditdomæne.dk`), DAV-rod (`/SOGo/dav/`) og direkte SOGo-kalenderlinks (`.../SOGo/dav/bruger/Calendar/personal/`).
+* **Kræver Mailcow Login (forbinder automatisk til `.env`-server):** Appen kræver login med dine Mailcow-oplysninger før kalenderen vises, og henter automatisk standardserveren fra `DEFAULT_CALDAV_URL` i `.env` / `compose.yaml`.
 * **Tilføj, Opret, Skjul & Slet Kalendere:**
   * Opret nye kalendere direkte på din Mailcow-server (`MKCALENDAR`) via `+`-knappen i sidepanelet.
   * Tilføj eksisterende eller delte SOGo CalDAV-links direkte.
@@ -53,7 +57,6 @@ Traditionelle webkalendere kræver utallige museklik, når man skal planlægge v
   * Klikbare kort-links til lokationer og direkte knapper til videomøder (Google Meet, Teams, Zoom, Jitsi, Whereby).
   * Fuld `VTIMEZONE`-understøttelse via `ical.js`.
   * Indbyggede OS/Browser-notifikationer ved `VALARM`-påmindelser.
-* **Indbygget Demo/Mock-tilstand:** Afprøv alle funktioner øjeblikkeligt uden en live Mailcow-server.
 
 ---
 
