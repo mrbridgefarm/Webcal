@@ -137,7 +137,8 @@ export async function apiUpdateRsvp(
 export async function apiCreateCalendar(
   session: AuthSession,
   name: string,
-  color: string
+  color: string,
+  calendarUrl?: string
 ): Promise<Omit<CalendarSource, 'visible'>> {
   const res = await fetch('/api/caldav/calendars', {
     method: 'POST',
@@ -147,7 +148,8 @@ export async function apiCreateCalendar(
       username: session.username,
       password: session.password,
       name,
-      color
+      color,
+      calendarUrl
     })
   });
   const data = await res.json();

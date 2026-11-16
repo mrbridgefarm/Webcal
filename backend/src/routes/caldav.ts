@@ -138,22 +138,24 @@ caldavRouter.delete('/events', async (req: Request, res: Response) => {
 
 /**
  * POST /api/caldav/calendars
- * Opretter en ny kalender på Mailcow/SOGo (MKCALENDAR).
+ * Opretter en ny kalender på Mailcow/SOGo (MKCALENDAR) eller tilføjer et eksisterende kalenderlink.
  */
 caldavRouter.post('/calendars', async (req: Request, res: Response) => {
   try {
     const creds = extractCredentials(req);
     const name = String(req.body?.name || '').trim();
     const color = String(req.body?.color || '#2563eb');
-    if (!name) {
-      res.status(400).json({ ok: false, error: 'Kalendernavn mangler.' });
+    const calendarUrl = req.body?.calendarUrl ? String(req.body.calendarUrl).trim() : undefined;
+
+    if (!name && !calendarUrl) {
+      res.status(400).json({ ok: false, error: 'Kalendernavn eller kalender-URL mangler.' });
       return;
     }
-    const calendar = await createCalDavCalendar(creds, name, color);
+    const calendar = await createCalDavCalendar(creds, name || 'SOGo Kalender', color, calendarUrl);
     res.json({ ok: true, calendar });
   } catch (err: any) {
-    console.error('Fejl ved oprettelse af kalender:', err?.message || err);
-    res.status(500).json({ ok: false, error: err?.message || 'Kunne ikke oprette kalenderen.' });
+    console.error('Fejl ved oprettelse/tilføjelse af kalender:', err?.message || err);
+    res.status(500).json({ ok: false, error: err?.message || 'Kunne ikke oprette eller tilføje kalenderen.' });
   }
 });
 

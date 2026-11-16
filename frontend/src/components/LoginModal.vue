@@ -77,7 +77,7 @@ async function handleDemoMode() {
               class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
             />
             <p class="text-[11px] text-slate-500 mt-1">
-              Du kan nøjes med domænet (f.eks. <code>mail.ditdomæne.dk</code>) — proxyen tilføjer automatisk <code>/SOGo/dav/</code>.
+              Du kan indtaste både domænet (<code>post2ko.bridgefarm.dk</code>), <code>/SOGo/dav/</code> eller dit direkte SOGo kalenderlink (<code>.../SOGo/dav/mail@.../Calendar/personal/</code>).
             </p>
           </div>
 

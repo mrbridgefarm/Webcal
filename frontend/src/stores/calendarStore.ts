@@ -291,7 +291,10 @@ export const useCalendarStore = defineStore('calendar', () => {
       applyColorOverridesToCalendars(storedCalendars);
       calendars.value = storedCalendars;
       events.value = storedEvents;
-      if (!activeTargetCalendarId.value && writableCalendars.value[0]) {
+      if (
+        !writableCalendars.value.some((c) => c.id === activeTargetCalendarId.value) &&
+        writableCalendars.value[0]
+      ) {
         activeTargetCalendarId.value = writableCalendars.value[0].id;
       }
     } else {
@@ -442,7 +445,10 @@ export const useCalendarStore = defineStore('calendar', () => {
       events.value = plainEvents;
       lastSyncedAt.value = res.syncedAt;
 
-      if (!activeTargetCalendarId.value && writableCalendars.value[0]) {
+      if (
+        !writableCalendars.value.some((c) => c.id === activeTargetCalendarId.value) &&
+        writableCalendars.value[0]
+      ) {
         activeTargetCalendarId.value = writableCalendars.value[0].id;
       }
 
@@ -879,7 +885,7 @@ export const useCalendarStore = defineStore('calendar', () => {
 
     for (const srcEvent of clipboard.value.events) {
       let targetCalId = srcEvent.calendarId;
-      if (isCalendarReadOnly(targetCalId)) {
+      if (!getCalendarById(targetCalId) || isCalendarReadOnly(targetCalId)) {
         if (!defaultWritableCalendar.value) {
           notify(
             'Ingen skrivbar kalender',
@@ -1034,32 +1040,38 @@ export const useCalendarStore = defineStore('calendar', () => {
     localStorage.setItem(HIDDEN_CAL_KEY, JSON.stringify(hiddenCalendarIds.value));
   }
 
-  async function createCalendar(name: string, color: string) {
+  async function createCalendar(name: string, color: string, calendarUrl?: string) {
     const trimmed = name.trim();
-    if (!trimmed) {
-      notify('Navn mangler', 'Giv kalenderen et navn.', 'warning');
+    const trimmedUrl = calendarUrl?.trim() || '';
+    if (!trimmed && !trimmedUrl) {
+      notify('Navn eller URL mangler', 'Giv kalenderen et navn eller indsæt et CalDAV-link.', 'warning');
       return null;
     }
 
     let newCal: CalendarSource;
     if (session.value?.mode === 'CALDAV') {
       if (!isOnline.value) {
-        notify('Offline', 'Du skal være online for at oprette en kalender på Mailcow.', 'warning');
+        notify('Offline', 'Du skal være online for at oprette eller tilføje en kalender på Mailcow.', 'warning');
         return null;
       }
       try {
-        const created = await apiCreateCalendar(session.value, trimmed, color);
+        const created = await apiCreateCalendar(
+          session.value,
+          trimmed || 'SOGo Kalender',
+          color,
+          trimmedUrl || undefined
+        );
         newCal = clonePlain({ ...created, visible: true });
       } catch (err: any) {
-        notify('Kunne ikke oprette kalender', err?.message || String(err), 'error', 9000);
+        notify('Kunne ikke oprette/tilføje kalender', err?.message || String(err), 'error', 9000);
         return null;
       }
     } else {
-      const id = `demo-${generateId()}`;
+      const id = trimmedUrl || `demo-${generateId()}`;
       newCal = {
         id,
-        url: `https://mail.demo.dk/SOGo/dav/carsten/Calendar/${id}/`,
-        name: trimmed,
+        url: trimmedUrl || `https://mail.demo.dk/SOGo/dav/carsten/Calendar/${id}/`,
+        name: trimmed || 'Ny Kalender',
         color,
         serverColor: color,
         readOnly: false,
@@ -1068,10 +1080,24 @@ export const useCalendarStore = defineStore('calendar', () => {
       };
     }
 
-    calendars.value.push(newCal);
+    hiddenCalendarIds.value = hiddenCalendarIds.value.filter((id) => id !== newCal.id);
+    persistHiddenCalendars();
+
+    const existingIdx = calendars.value.findIndex((c) => c.id === newCal.id);
+    if (existingIdx !== -1) {
+      calendars.value[existingIdx] = newCal;
+    } else {
+      calendars.value.push(newCal);
+    }
     await db.calendars.put(clonePlain(newCal));
-    activeTargetCalendarId.value = newCal.id;
-    notify('Kalender oprettet', `"${trimmed}" er klar og valgt som mål-kalender.`, 'success');
+    if (!newCal.readOnly) {
+      activeTargetCalendarId.value = newCal.id;
+    }
+    notify('Kalender tilføjet', `"${newCal.name}" er klar.`, 'success');
+
+    if (session.value?.mode === 'CALDAV' && trimmedUrl) {
+      void syncWithServer(true);
+    }
     return newCal;
   }
 

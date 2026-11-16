@@ -27,6 +27,39 @@ const notifPermission = ref<string>(
     : 'denied'
 );
 
+const showNewCalendarForm = ref(false);
+const newCalendarName = ref('');
+const newCalendarUrl = ref('');
+const newCalendarColor = ref('#7c3aed');
+const isCreatingCalendar = ref(false);
+
+async function submitNewCalendar() {
+  isCreatingCalendar.value = true;
+  try {
+    const created = await store.createCalendar(
+      newCalendarName.value,
+      newCalendarColor.value,
+      newCalendarUrl.value || undefined
+    );
+    if (created) {
+      newCalendarName.value = '';
+      newCalendarUrl.value = '';
+      showNewCalendarForm.value = false;
+    }
+  } finally {
+    isCreatingCalendar.value = false;
+  }
+}
+
+async function confirmDeleteCalendar(calId: string, name: string) {
+  const ok = window.confirm(
+    `Slet kalenderen "${name}" permanent?\n\nAlle begivenheder i kalenderen slettes også på serveren. Dette kan ikke fortrydes.`
+  );
+  if (ok) {
+    await store.deleteCalendar(calId);
+  }
+}
+
 const selectedEventsList = computed<CalendarEvent[]>(() => {
   if (store.selectedEventIds.length === 0) return [];
   const idSet = new Set(store.selectedEventIds);
@@ -106,19 +139,18 @@ function removeSingleClipboardEvent(evId: string) {
           </div>
         </div>
 
-        <!-- Formular: Ny kalender -->
+        <!-- Formular: Ny kalender eller tilføj eksisterende CalDAV-link -->
         <form
           v-if="showNewCalendarForm"
           class="mb-2.5 p-2.5 rounded-xl bg-slate-950 border border-blue-500/40 space-y-2"
           @submit.prevent="submitNewCalendar"
         >
-          <div class="text-[11px] font-semibold text-slate-200">Ny kalender</div>
+          <div class="text-[11px] font-semibold text-slate-200">Tilføj / Opret kalender</div>
           <div class="flex items-center gap-2">
             <input
               v-model="newCalendarName"
               type="text"
-              required
-              placeholder="Kalendernavn..."
+              placeholder="Kalendernavn (f.eks. Vagtplan)..."
               class="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500"
             />
             <input
@@ -126,6 +158,14 @@ function removeSingleClipboardEvent(evId: string) {
               type="color"
               class="w-8 h-8 rounded-lg bg-transparent border border-slate-700 cursor-pointer shrink-0"
               title="Vælg farve"
+            />
+          </div>
+          <div>
+            <input
+              v-model="newCalendarUrl"
+              type="text"
+              placeholder="Valgfri SOGo CalDAV URL (ellers oprettes ny)..."
+              class="w-full px-2.5 py-1.5 text-[11px] bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
             />
           </div>
           <div class="flex items-center justify-end gap-1.5">
@@ -141,7 +181,7 @@ function removeSingleClipboardEvent(evId: string) {
               :disabled="isCreatingCalendar"
               class="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
             >
-              {{ isCreatingCalendar ? 'Opretter...' : 'Opret kalender' }}
+              {{ isCreatingCalendar ? 'Gemmer...' : (newCalendarUrl ? 'Tilføj link' : 'Opret ny') }}
             </button>
           </div>
         </form>
@@ -187,17 +227,16 @@ function removeSingleClipboardEvent(evId: string) {
               <button
                 v-if="!cal.readOnly && !cal.isShared"
                 type="button"
-                class="p-1 rounded hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                class="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
                 title="Slet kalender (inkl. alle begivenheder)"
                 @click="confirmDeleteCalendar(cal.id, cal.name)"
               >
                 <Trash2 class="w-3 h-3" />
               </button>
               <button
-                v-else
                 type="button"
-                class="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-slate-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
-                title="Fjern delt kalender fra listen"
+                class="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                title="Fjern/skjul kalender fra listen"
                 @click="store.hideCalendar(cal.id)"
               >
                 <EyeOff class="w-3 h-3" />
@@ -226,6 +265,16 @@ function removeSingleClipboardEvent(evId: string) {
             </div>
           </div>
         </div>
+
+        <button
+          v-if="store.hiddenCalendarIds.length > 0"
+          type="button"
+          class="mt-2 w-full py-1 px-2 rounded-lg bg-slate-800/60 hover:bg-slate-800 border border-slate-700/70 text-[11px] text-slate-300 flex items-center justify-center gap-1.5 transition"
+          @click="store.restoreHiddenCalendars()"
+        >
+          <RotateCcw class="w-3 h-3" />
+          Vis {{ store.hiddenCalendarIds.length }} skjult(e) kalender(e) igen
+        </button>
       </div>
 
       <!-- Standard kalender til Ctrl+V / Nye begivenheder -->
