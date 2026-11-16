@@ -27,6 +27,7 @@ let lastClickedId = '';
 const fcEvents = computed(() =>
   store.visibleEvents.map((ev) => {
     const cal = store.getCalendarById(ev.calendarId);
+    const calColor = cal?.color || '#06b6d4';
     const isSelected = store.selectedEventIds.includes(ev.id);
     const isInClipboard = store.clipboardEventIds.has(ev.id);
     const clipboardMode = isInClipboard ? store.clipboard.mode : null;
@@ -39,16 +40,19 @@ const fcEvents = computed(() =>
       start: ev.start,
       end: ev.end,
       allDay: ev.allDay,
+      display: 'block',
       editable: !isReadOnly,
       startEditable: !isReadOnly,
       durationEditable: !isReadOnly,
-      backgroundColor: cal?.color || '#2563eb',
+      backgroundColor: calColor,
       borderColor: isSelected
         ? '#f8fafc'
         : isInClipboard
           ? '#34d399'
-          : cal?.color || '#2563eb',
+          : calColor,
+      textColor: '#ffffff',
       classNames: [
+        'dav-event-box',
         isSelected ? 'dav-event-selected' : '',
         isInClipboard && clipboardMode === 'COPY' ? 'dav-event-copied' : '',
         isInClipboard && clipboardMode === 'CUT' ? 'dav-event-cut' : '',
@@ -57,6 +61,7 @@ const fcEvents = computed(() =>
       extendedProps: {
         eventId: ev.id,
         rawEvent: ev,
+        calColor,
         isSelected,
         isInClipboard,
         clipboardMode,
@@ -115,7 +120,6 @@ function handleEventClick(arg: EventClickArg) {
 
   store.selectedDateStr = toDateOnlyString(new Date(ev.start));
 
-  // I offentlig Read-Only delingstilstand åbner et klik blot detalje-visningen
   if (store.isPublicShareMode) {
     store.openEditEventModal(ev);
     return;
@@ -250,7 +254,13 @@ const calendarOptions = computed<CalendarOptions>(() => ({
   firstDay: 1,
   headerToolbar: false,
   height: '100%',
-  dayMaxEvents: 7,
+  expandRows: true,
+  fixedWeekCount: false,
+  // Tilpasser automatisk antal synlige rækker til feltets højde, så datofeltet ALDRIG vokser sig kæmpestort
+  dayMaxEvents: true,
+  dayMaxEventRows: true,
+  // Tvinger ALLE aftaler (både tidsbestemte og heldags) til at vises med en tydelig farvet kasse rundt om
+  eventDisplay: 'block',
   moreLinkText: (num: number) => `+ ${num} flere`,
   navLinks: false,
   editable: !store.isPublicShareMode,
@@ -327,6 +337,13 @@ function jumpToDate(dateIso: string) {
   }
 }
 
+function updateSize() {
+  const api = calendarRef.value?.getApi();
+  if (api) {
+    api.updateSize();
+  }
+}
+
 onMounted(() => {
   const api = calendarRef.value?.getApi();
   if (api) {
@@ -334,13 +351,6 @@ onMounted(() => {
   }
   void nextTick(updateSelectedDayHighlight);
 });
-
-function updateSize() {
-  const api = calendarRef.value?.getApi();
-  if (api) {
-    api.updateSize();
-  }
-}
 
 defineExpose({
   goPrev,
@@ -382,12 +392,19 @@ defineExpose({
           {{ store.clipboard.events.length }} i udklipsholder ({{ store.clipboard.events[0]?.title }})
         </span>
       </div>
-      <div class="hidden xl:flex items-center gap-4 text-[11px]">
-        <span class="flex items-center gap-1 text-slate-300">
-          <Users class="w-3.5 h-3.5 text-purple-300" /> Møde m/ deltagere (Ctrl+C låst)
-        </span>
-        <span class="flex items-center gap-1 text-slate-300">
-          <Lock class="w-3.5 h-3.5 text-amber-400" /> Read-Only
+
+      <!-- Hurtig farve-forklaring over synlige kalendere -->
+      <div class="hidden md:flex items-center gap-3 text-[11px] overflow-x-auto">
+        <span
+          v-for="cal in store.visibleCalendars"
+          :key="cal.id"
+          class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-200 font-medium shrink-0"
+        >
+          <span
+            class="w-2.5 h-2.5 rounded-sm shrink-0"
+            :style="{ backgroundColor: cal.color }"
+          ></span>
+          <span class="truncate max-w-[120px]">{{ cal.name }}</span>
         </span>
       </div>
     </div>
@@ -400,34 +417,39 @@ defineExpose({
         <template #eventContent="arg">
           <div
             :data-dav-event-id="arg.event.id"
-            class="w-full px-1.5 py-0.5 flex items-center justify-between gap-1 overflow-hidden text-[11px] leading-tight cursor-pointer select-none"
-            :title="`${arg.event.title}${arg.event.extendedProps.isInClipboard ? ' (I UDKLIPSHOLDER)' : ''}${arg.event.extendedProps.hasGuests ? ' (Har mødedeltagere - Ctrl+C spærret)' : ''}`"
+            class="w-full px-1.5 py-0.5 flex items-center justify-between gap-1 overflow-hidden text-[11px] leading-tight cursor-pointer select-none rounded-[5px]"
+            :style="{
+              backgroundColor: arg.event.extendedProps.calColor || '#06b6d4',
+              borderLeft: '3px solid rgba(255, 255, 255, 0.45)',
+              boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.18)'
+            }"
+            :title="`${arg.event.title} — Kalender: ${arg.event.extendedProps.calendarName}${arg.event.extendedProps.isInClipboard ? ' (I UDKLIPSHOLDER)' : ''}${arg.event.extendedProps.hasGuests ? ' (Har mødedeltagere - Ctrl+C spærret)' : ''}`"
           >
-            <div class="flex items-center gap-1 min-w-0 truncate">
+            <div class="flex items-center gap-1 min-w-0 truncate text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.45)]">
               <span
                 v-if="arg.event.extendedProps.isInClipboard"
-                class="px-1 py-0.2 rounded bg-black/40 text-emerald-300 text-[9px] font-bold uppercase shrink-0"
+                class="px-1 py-0.2 rounded bg-black/50 text-emerald-300 text-[9px] font-bold uppercase shrink-0"
               >
                 {{ arg.event.extendedProps.clipboardMode === 'CUT' ? 'KLIP' : 'KOPI' }}
               </span>
-              <span v-if="arg.timeText" class="font-semibold opacity-90 shrink-0">
+              <span v-if="arg.timeText" class="font-bold opacity-95 shrink-0">
                 {{ arg.timeText }}
               </span>
-              <span class="font-medium truncate">{{ arg.event.title }}</span>
+              <span class="font-semibold truncate">{{ arg.event.title }}</span>
             </div>
 
-            <div class="flex items-center gap-0.5 shrink-0">
+            <div class="flex items-center gap-0.5 shrink-0 text-white/90">
               <Video
                 v-if="arg.event.extendedProps.rawEvent?.videoUrl"
-                class="w-3 h-3 text-sky-200"
+                class="w-3 h-3"
               />
               <Users
                 v-if="arg.event.extendedProps.hasGuests"
-                class="w-3 h-3 text-purple-200"
+                class="w-3 h-3"
               />
               <Lock
                 v-if="arg.event.extendedProps.isReadOnly && !store.isPublicShareMode"
-                class="w-3 h-3 text-amber-200"
+                class="w-3 h-3"
               />
             </div>
           </div>
