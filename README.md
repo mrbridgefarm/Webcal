@@ -2,7 +2,8 @@
 
 En lynhurtig, tastatur-venlig webkalender med **Mailcow / SOGo CalDAV**-integration og "Excel-lignende" **Copy/Paste workflows** (`Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+Z`) direkte i webbrowseren.
 
-Designet til at køre i **Docker på både x86 (`linux/amd64`) og ARM (`linux/arm64`)**.
+Bygges automatisk som et **Multi-Arch Docker-image (`linux/amd64` & `linux/arm64`)** på GitHub Container Registry:
+**`ghcr.io/mrbridgefarm/webcal:latest`**
 
 ---
 
@@ -20,37 +21,32 @@ Designet til at køre i **Docker på både x86 (`linux/amd64`) og ARM (`linux/ar
 
 ---
 
-## Kørsel i Docker (x86_64 & ARM64)
+## Kørsel i Docker på din VM (x86_64 & ARM64)
 
-Projektet bruger `node:22-alpine` uden native C++-afhængigheder og bygger derfor 100 % identisk på både **x86 (`linux/amd64`)** og **ARM (`linux/arm64`)**.
+GitHub Actions ([`.github/workflows/docker-multiarch.yml`](.github/workflows/docker-multiarch.yml)) bygger automatisk imaget `ghcr.io/mrbridgefarm/webcal:latest` til både **x86 (`linux/amd64`)** og **ARM (`linux/arm64`)**, så din VM slipper for selv at bygge koden.
 
-### Metode 1: Klon fra dit private GitHub repo på din VM og byg lokalt
-
-På din VM (uanset om den kører x86_64 eller ARM64):
-
+### 1. Log ind på GHCR på din VM (kun nødvendigt hvis pakken er privat)
+Opret en GitHub Personal Access Token (Classic) med `read:packages`-rettighed og kør på VM'en:
 ```bash
-git clone git@github.com:<dit-brugernavn>/<dit-repo>.git
-cd <dit-repo>
-
-# Valgfrit: Kopiér .env.example til .env og tilpas port / standard Mailcow URL
-cp .env.example .env
-
-# Sørg for at dit "pangolin" Docker-netværk findes (hvis Pangolin ikke allerede har oprettet det):
-docker network inspect pangolin >/dev/null 2>&1 || docker network create pangolin
-
-# Byg og start containeren i baggrunden (bruger compose.yaml)
-docker compose up -d --build
+echo <DIT_GITHUB_TOKEN> | docker login ghcr.io -u mrbridgefarm --password-stdin
 ```
 
-I **Pangolin** kan du nu oprette en ressource, der peger direkte på container-navnet **`http://dav-sync-cal:3000`** på `pangolin`-netværket (eller tilgå den via `http://<din-vm-ip>:3000`). Se også [`compose.example.yaml`](compose.example.yaml) for flere detaljer.
+### 2. Start med `compose.yaml` (bruger `pangolin`-netværket)
+På din VM behøver du kun `compose.yaml` (og evt. `.env`):
+```bash
+# Sørg for at dit "pangolin" Docker-netværk findes:
+docker network inspect pangolin >/dev/null 2>&1 || docker network create pangolin
 
-### Metode 2: Multi-Arch Image via GitHub Actions (`ghcr.io`)
+# Hent nyeste image fra GHCR og start containeren:
+docker compose pull
+docker compose up -d
+```
 
-Repoet indeholder [`.github/workflows/docker-multiarch.yml`](.github/workflows/docker-multiarch.yml), som automatisk bygger et kombineret **`linux/amd64` + `linux/arm64`** Docker-image via Docker Buildx og skubber det til GitHub Container Registry (`ghcr.io/<dit-brugernavn>/<dit-repo>:latest`), når du pusher til `main`.
+I **Pangolin** kan du nu oprette en ressource, der peger direkte på **`http://dav-sync-cal:3000`** på `pangolin`-netværket (eller tilgå den via `http://<din-vm-ip>:3000`). Se også [`compose.example.yaml`](compose.example.yaml) for flere detaljer.
 
 ---
 
-## Miljøvariabler (`.env` / `docker-compose.yml`)
+## Miljøvariabler (`.env` / `compose.yaml`)
 
 | Variabel | Standard | Beskrivelse |
 | :--- | :--- | :--- |

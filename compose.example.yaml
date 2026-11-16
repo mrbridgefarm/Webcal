@@ -1,18 +1,18 @@
 # ==============================================================================
 # Eksempel på Docker Compose (compose.yaml) med "pangolin" netværk
-# Kopiér evt. til compose.yaml: cp compose.example.yaml compose.yaml
+# Henter det færdigbyggede Multi-Arch image (x86_64 & ARM64) fra GHCR:
+#   ghcr.io/mrbridgefarm/webcal:latest
 #
-# Bemærk: Hvis netværket "pangolin" ikke findes endnu på din VM, kan det oprettes med:
-#   docker network create pangolin
+# Bemærk:
+# 1. Hvis dit repo/pakke på GitHub er privat, logger du ind på VM'en én gang med:
+#      echo <DIT_GITHUB_PAT_TOKEN> | docker login ghcr.io -u mrbridgefarm --password-stdin
+# 2. Hvis netværket "pangolin" ikke findes endnu på din VM, kan det oprettes med:
+#      docker network create pangolin
 # ==============================================================================
 
 services:
   dav-sync-cal:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    # Alternativt, hvis du henter det færdigbyggede multi-arch image fra GitHub (GHCR):
-    # image: ghcr.io/<dit-github-brugernavn>/webcal:latest
+    image: ghcr.io/mrbridgefarm/webcal:latest
     container_name: dav-sync-cal
     restart: unless-stopped
 

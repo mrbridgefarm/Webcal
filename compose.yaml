@@ -1,8 +1,6 @@
 services:
   dav-sync-cal:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/mrbridgefarm/webcal:latest
     container_name: dav-sync-cal
     restart: unless-stopped
     expose:
