@@ -41,6 +41,29 @@ export function clonePlain<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
 }
 
+/**
+ * Genererer en RFC4122 v4 UUID, som også virker over almindelig HTTP (http://<vm-ip>:3000),
+ * hvor browserens window.crypto.randomUUID() ellers er deaktiveret pga. manglende HTTPS.
+ */
+export function generateId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export const useCalendarStore = defineStore('calendar', () => {
   // --- State ---
   const session = ref<AuthSession | null>(null);
@@ -94,7 +117,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     type: ToastMessage['type'] = 'info',
     durationMs = 4500
   ) {
-    const id = crypto.randomUUID();
+    const id = generateId();
     toasts.value.push({ id, title, detail, type });
     window.setTimeout(() => {
       toasts.value = toasts.value.filter((t) => t.id !== id);
@@ -481,7 +504,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   // --- CRUD på Begivenheder + Undo (Ctrl+Z) + Papirkurv ---
   function pushUndo(label: string, undoFn: () => Promise<void>) {
     undoStack.value.push({
-      id: crypto.randomUUID(),
+      id: generateId(),
       label,
       timestamp: new Date().toISOString(),
       undo: undoFn
@@ -517,7 +540,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     const existing = eventInput.id ? events.value.find((e) => e.id === eventInput.id) : undefined;
     const previousSnapshot = existing ? clonePlain(existing) : null;
 
-    const uid = eventInput.uid || existing?.uid || crypto.randomUUID();
+    const uid = eventInput.uid || existing?.uid || generateId();
     const id = `${eventInput.calendarId}::${uid}`;
 
     const fullEvent: CalendarEvent = clonePlain({
