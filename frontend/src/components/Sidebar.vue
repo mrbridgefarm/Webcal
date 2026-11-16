@@ -116,7 +116,7 @@ function removeSingleClipboardEvent(evId: string) {
 </script>
 
 <template>
-  <aside class="w-76 bg-slate-900/90 border-r border-slate-800 flex flex-col justify-between p-4 select-none overflow-y-auto shrink-0">
+  <aside class="w-72 bg-slate-900/90 border-r border-slate-800 flex flex-col justify-between p-4 select-none overflow-y-auto shrink-0">
     <div class="space-y-5">
       <!-- Kalendere (Egne & Delte SOGo) -->
       <div>

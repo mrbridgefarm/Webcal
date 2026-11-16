@@ -1,55 +1,108 @@
-# DAV-Sync Cal
+# 📅 DAV-Sync Cal
 
-En lynhurtig, tastatur-venlig webkalender med **Mailcow / SOGo CalDAV**-integration og "Excel-lignende" **Copy/Paste workflows** (`Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+Z`) direkte i webbrowseren.
+**En lynhurtig, tastatur-venlig webkalender bygget til personlig planlægning, vagtplanlægning og time-blocking — med direkte Mailcow / SOGo CalDAV-integration.**
 
-Bygges automatisk som et **Multi-Arch Docker-image (`linux/amd64` & `linux/arm64`)** på GitHub Container Registry:
+![DAV-Sync Cal Forside & Brugerflade](docs/preview.svg)
+
+---
+
+## 🎯 Vision
+Traditionelle webkalendere kræver utallige museklik, når man skal planlægge vagter, gentage fokus-blokke eller flytte aftaler rundt på tværs af ugen. **DAV-Sync Cal** kombinerer alle de klassiske kalenderfunktioner med **ægte "Excel-lignende" Copy/Paste-workflows (`Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+Z`)** direkte i webbrowseren, samtidig med at alt synkroniseres tovejs med din **Mailcow / SOGo**-server.
+
+---
+
+## ✨ Unikke Funktioner ("Drysset")
+
+### 📋 1. Ægte Copy / Cut / Paste på tværs af dage (`Ctrl+C`, `Ctrl+X`, `Ctrl+V`)
+* **Lynhurtig vagtplanlægning & time-blocking:** Klik på én eller flere aftaler (med `Ctrl`/`Shift`-klik) — eller markér en hel dag — og tryk `Ctrl+C` (kopiér) eller `Ctrl+X` (klip).
+* **Visuel Udklipsholder:** De kopierede aftaler vises øjeblikkeligt i **Udklipsholder-boksen** i venstre sidepanel, som en **svævende handlingsbjælke** nederst på skærmen, og med et `KOPI` / `KLIP`-badge direkte på selve aftalen i kalendergitteret.
+* **Bevarer klokkeslæt og varighed:** Klik på en hvilken som helst ny dato i kalenderen (som markeres med en tydelig blå ramme) og tryk `Ctrl+V` — aftalen oprettes på den nye dag med præcis samme start- og sluttidspunkt.
+
+### 🖱️ 2. Custom Højrekliksmenu (som i Google Docs)
+* Højreklik på en aftale eller direkte på et datofelt i måned-, uge- eller dagsvisning for at åbne DAV-Sync Cals egen kontekstmenu (`e.preventDefault()`).
+* Hurtig adgang til **Kopiér (`Ctrl+C`)**, **Klip (`Ctrl+X`)**, **Indsæt på dato (`Ctrl+V`)**, **Ny begivenhed**, **Redigér**, **Fortryd (`Ctrl+Z`)** og **Flyt til papirkurv (`Delete`)**.
+
+### 🛡️ 3. Mødesikkerhed (Spam-beskyttelse) & Read-Only Beskyttelse
+* **Automatisk mødesikkerhed:** Hvis en begivenhed indeholder andre inviterede mødedeltagere (`ATTENDEE`), spærres `Ctrl+C` automatisk med en advarsel, så du aldrig ved et uheld duplikerer mødeindkaldelser og spammer deltagere.
+* **Intelligent Read-Only lås:** Delte SOGo-kalendere uden skriverettigheder markeres med et `🔒 Read-Only`-badge og låses automatisk for redigering, Træk-og-Slip, sletning og `Ctrl+V`.
+
+### ↶ 4. Lokal Fortryd (`Ctrl+Z`) & 30-dages Papirkurv
+* **Fortryd med ét tryk (`Ctrl+Z`):** Alle oprettelser, redigeringer, træk-og-slip flytninger, indsættelser og sletninger lægges i en lokal historik-stak og kan fortrydes øjeblikkeligt.
+* **30-dages lokal papirkurv:** Slettede begivenheder gemmes i browserens IndexedDB i 30 dage med nedtælling og kan gendannes med et enkelt klik.
+
+### ⚡ 5. Øjeblikkelig Lokal Søgning & Kollisions-advarsler
+* **Millisekund-søgning:** Søgefeltet i topbaren filtrerer øjeblikkeligt mod det lokale indeks i browseren på tværs af titler, lokationer, beskrivelser og mødedeltagere.
+* **Kollisions-detektion:** Overlappende aftaler på tværs af dine synlige kalendere markeres automatisk med en gul advarselsramme (`⚠️`) og tælles i topbaren, så dobbeltbookinger opdages med det samme.
+
+### 📶 6. Offline Caching (PWA) & Baggrunds-synkronisering
+* **100 % Offline læse- og skriveadgang:** Kalenderdata gemmes lokalt i **IndexedDB (`Dexie.js`)** kombineret med en **PWA Service Worker**.
+* **Automatisk Sync-kø:** Hvis internetforbindelsen eller Mailcow-serveren er utilgængelig, lægges ændringer i en lokal kø og skubbes automatisk til serveren, så snart forbindelsen er tilbage.
+
+---
+
+## 🔗 Mailcow & SOGo CalDAV Kernemotor
+
+* **Fleksibelt Login:** Log ind med din Mailcow e-mail og adgangskode / App-adgangskode. Understøtter både domæne (`post2ko.ditdomæne.dk`), DAV-rod (`/SOGo/dav/`) og direkte SOGo-kalenderlinks (`.../SOGo/dav/bruger/Calendar/personal/`).
+* **Tilføj, Opret, Skjul & Slet Kalendere:**
+  * Opret nye kalendere direkte på din Mailcow-server (`MKCALENDAR`) via `+`-knappen i sidepanelet.
+  * Tilføj eksisterende eller delte SOGo CalDAV-links direkte.
+  * Skjul uønskede kalendere fra oversigten (med mulighed for at gendanne dem) eller slet egne kalendere.
+* **Farvestyring:** Synkroniserer automatisk SOGo's serverfarver med mulighed for at overskrive farven lokalt pr. kalender (og gendanne serverfarven med ét klik).
+* **RSVP & Mødehåndtering:** Se deltagerstatus og svar **Deltager**, **Måske** eller **Afvis** direkte på mødeinvitationer (`PARTSTAT`).
+* **Rige Begivenhedsdata, Tidszoner & Notifikationer:**
+  * Klikbare kort-links til lokationer og direkte knapper til videomøder (Google Meet, Teams, Zoom, Jitsi, Whereby).
+  * Fuld `VTIMEZONE`-understøttelse via `ical.js`.
+  * Indbyggede OS/Browser-notifikationer ved `VALARM`-påmindelser.
+* **Indbygget Demo/Mock-tilstand:** Afprøv alle funktioner øjeblikkeligt uden en live Mailcow-server.
+
+---
+
+## ⌨️ Oversigt over Genvejstaster & Musehandlinger
+
+| Handling | Genvej / Mus |
+| :--- | :--- |
+| **Markér begivenhed** | Venstreklik på begivenhed |
+| **Markér flere begivenheder** | `Ctrl + Klik` eller `Shift + Klik` |
+| **Vælg mål-dato til indsæt** | Venstreklik på datofelt i kalenderen |
+| **Kopiér valgt(e) aftale(r) / dag** | `Ctrl + C` (eller højreklik → *Kopiér*) |
+| **Klip valgt(e) aftale(r)** | `Ctrl + X` (eller højreklik → *Klip*) |
+| **Indsæt på valgt mål-dato** | `Ctrl + V` (eller klik *Indsæt her* i Udklipsholder) |
+| **Fortryd seneste handling** | `Ctrl + Z` (eller klik *Fortryd* i topbaren) |
+| **Slet til 30-dages papirkurv** | `Delete` / `Backspace` (eller højreklik → *Flyt til papirkurv*) |
+| **Åbn / Redigér begivenhed** | Dobbeltklik på begivenhed |
+| **Opret ny begivenhed på dato** | Dobbeltklik på et tomt datofelt |
+| **Åbn custom kontekstmenu** | Højreklik på begivenhed eller datofelt |
+
+---
+
+## 🐳 Kørsel i Docker (Multi-Arch: `x86_64` & `ARM64`)
+
+Projektet bygges automatisk via GitHub Actions til både **x86 (`linux/amd64`)** og **ARM (`linux/arm64`)** og udgives på GitHub Container Registry:
 **`ghcr.io/mrbridgefarm/webcal:latest`**
 
----
+### Hurtig start med `compose.yaml` (og `pangolin` netværk)
 
-## Funktioner ("Drysset" & Kernemotoren)
-
-* **Ægte Copy/Paste på tværs af dage (`Ctrl+C`, `Ctrl+X`, `Ctrl+V`):** Markér én eller flere begivenheder (eller en hel dag), kopiér med `Ctrl+C`, klik på en ny dato og indsæt med `Ctrl+V` (bevarer klokkeslæt og varighed).
-* **Mødesikkerhed (Spam-beskyttelse):** `Ctrl+C` blokeres automatisk for møder, der indeholder andre inviterede deltagere (`ATTENDEE`).
-* **Intelligent Read-Only styring:** Registrerer automatisk skrivebeskyttede delte SOGo-kalendere og låser redigering, Træk-og-Slip og `Ctrl+V` på disse.
-* **Custom Højrekliksmenu:** Indbygget højrekliksmenu (`e.preventDefault()`) på både begivenheder og datoer.
-* **Lokal Fortryd (`Ctrl+Z`) & 30-dages Papirkurv:** Fortryd øjeblikkeligt oprettelser, flytninger og sletninger. Slettede begivenheder opbevares lokalt i IndexedDB i 30 dage.
-* **Offline Caching (PWA) & Sync-kø:** Fuld læse- og skriveadgang uden internet via Service Worker og IndexedDB (`Dexie.js`). Ændringer sættes i kø og synkroniseres automatisk med Mailcow, når forbindelsen genoprettes.
-* **Øjeblikkelig Lokal Søgning & Kollisions-advarsler:** Millisekund-søgning mod lokalt indeks samt visuel markering af dobbeltbookinger på tværs af kalendere.
-* **RSVP, VTIMEZONE & VALARM:** Svar *Deltager*, *Måske* eller *Afvis* på møder, præcis tidszonehåndtering via `ical.js` og OS-notifikationer i browseren.
-* **Indbygget Demo/Mock-tilstand:** Kan testes øjeblikkeligt uden en live Mailcow-server.
-
----
-
-## Kørsel i Docker på din VM (x86_64 & ARM64)
-
-GitHub Actions ([`.github/workflows/docker-multiarch.yml`](.github/workflows/docker-multiarch.yml)) bygger automatisk imaget `ghcr.io/mrbridgefarm/webcal:latest` til både **x86 (`linux/amd64`)** og **ARM (`linux/arm64`)**, så din VM slipper for selv at bygge koden.
-
-### 1. Log ind på GHCR på din VM (kun nødvendigt hvis pakken er privat)
-Opret en GitHub Personal Access Token (Classic) med `read:packages`-rettighed og kør på VM'en:
 ```bash
-echo <DIT_GITHUB_TOKEN> | docker login ghcr.io -u mrbridgefarm --password-stdin
-```
-
-### 2. Start med `compose.yaml` (bruger `pangolin`-netværket)
-På din VM behøver du kun `compose.yaml` (og evt. `.env`):
-```bash
-# Sørg for at dit "pangolin" Docker-netværk findes:
+# 1. Sørg for at dit "pangolin" Docker-netværk findes:
 docker network inspect pangolin >/dev/null 2>&1 || docker network create pangolin
 
-# Hent nyeste image fra GHCR og start containeren:
+# 2. Hent det færdigbyggede multi-arch image og start containeren:
 docker compose pull
 docker compose up -d
 ```
 
-I **Pangolin** kan du nu oprette en ressource, der peger direkte på **`http://dav-sync-cal:3000`** på `pangolin`-netværket (eller tilgå den via `http://<din-vm-ip>:3000`). Se også [`compose.example.yaml`](compose.example.yaml) for flere detaljer.
+I **Pangolin** kan du pege direkte på **`http://dav-sync-cal:3000`** (eller tilgå webkalenderen på `http://<din-vm-ip>:3000`). Se også [`compose.example.yaml`](compose.example.yaml) for alle konfigurationsmuligheder.
 
----
-
-## Miljøvariabler (`.env` / `compose.yaml`)
+### Miljøvariabler
 
 | Variabel | Standard | Beskrivelse |
 | :--- | :--- | :--- |
 | `PORT` | `3000` | Porten som webkalenderen og CalDAV-proxyen lytter på |
-| `DEFAULT_CALDAV_URL` | *(tom)* | Valgfri standard Mailcow URL (f.eks. `https://mail.ditdomæne.dk/SOGo/dav/`) |
-| `ALLOW_INSECURE_TLS` | `false` | Sæt til `true` hvis din Mailcow VM bruger et selv-signeret certifikat på LAN |
+| `DEFAULT_CALDAV_URL` | *(tom)* | Valgfri standard Mailcow URL (f.eks. `https://post2ko.bridgefarm.dk/SOGo/dav/`) |
+| `ALLOW_INSECURE_TLS` | `false` | Sæt til `true` hvis din Mailcow-server bruger selv-signeret certifikat på LAN |
+
+---
+
+## 🛠️ Teknologisk Stack
+* **Frontend:** Vue 3 (Composition API) + TypeScript + Vite + Tailwind CSS + FullCalendar (`dayGrid`, `timeGrid`, `interaction`) + Pinia + Dexie.js (IndexedDB) + PWA Service Worker.
+* **Backend Proxy:** Node.js + Express + TypeScript + `tsdav` + `ical.js` + direkte WebDAV/CalDAV XML-engine (`PROPFIND`, `REPORT`, `PUT`, `DELETE`, `MKCALENDAR`).
