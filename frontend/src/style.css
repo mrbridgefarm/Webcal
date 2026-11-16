@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   FullCalendar Dark Theme Tilpasning til DAV-Sync Cal
+   ========================================================================== */
+.fc {
+  --fc-border-color: #1e293b;
+  --fc-page-bg-color: #020617;
+  --fc-neutral-bg-color: #0f172a;
+  --fc-list-event-hover-bg-color: #1e293b;
+  --fc-today-bg-color: rgba(37, 99, 235, 0.10);
+  --fc-event-border-color: transparent;
+  --fc-now-indicator-color: #ef4444;
+  font-family: inherit;
+}
+
+.fc .fc-col-header-cell {
+  background-color: #0f172a;
+  padding: 8px 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+}
+
+.fc .fc-daygrid-day-number {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  padding: 6px 8px;
+}
+
+.fc .fc-day-today .fc-daygrid-day-number {
+  background-color: #2563eb;
+  color: #ffffff;
+  border-radius: 9999px;
+  padding: 2px 8px;
+  margin: 4px;
+}
+
+.fc .fc-daygrid-event,
+.fc .fc-timegrid-event {
+  border-radius: 6px;
+  padding: 1px 2px;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+/* Markering af valgt begivenhed (Ctrl+C / Ctrl+X klar) */
+.fc .dav-event-selected {
+  outline: 2px solid #f8fafc !important;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.55) !important;
+  z-index: 15 !important;
+}
+
+/* Kollisions-advarsel på tværs af kalendere */
+.fc .dav-event-collision {
+  box-shadow: inset 0 0 0 2px #f59e0b !important;
+}
+
+/* Read-Only begivenheder */
+.fc .dav-event-readonly {
+  opacity: 0.88;
+}
+
+/* "+ X flere" knap og Popover */
+.fc .fc-daygrid-more-link {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #60a5fa;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.fc .fc-daygrid-more-link:hover {
+  background-color: rgba(59, 130, 246, 0.15);
+}
+
+.fc-theme-standard .fc-popover {
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.7);
+  z-index: 40;
+}
+
+.fc-theme-standard .fc-popover-header {
+  background-color: #1e293b;
+  color: #f1f5f9;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-top-left-radius: 11px;
+  border-top-right-radius: 11px;
+}
+
+.fc .fc-timegrid-slot-label-cushion {
+  font-size: 0.7rem;
+  color: #64748b;
+}
