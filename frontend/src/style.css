@@ -41,6 +41,12 @@
   margin: 4px;
 }
 
+/* Tydelig markering af den valgte mål-dato (hvor Ctrl+V indsætter) */
+.fc .dav-day-selected {
+  background-color: rgba(59, 130, 246, 0.14) !important;
+  box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.65) !important;
+}
+
 .fc .fc-daygrid-event,
 .fc .fc-timegrid-event {
   border-radius: 6px;
@@ -48,12 +54,26 @@
   transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
 
-/* Markering af valgt begivenhed (Ctrl+C / Ctrl+X klar) */
+/* Markering af valgt begivenhed (klar til Ctrl+C / Ctrl+X) */
 .fc .dav-event-selected {
   outline: 2px solid #f8fafc !important;
   outline-offset: 1px;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.65) !important;
   z-index: 15 !important;
+}
+
+/* Markering af kopieret begivenhed i udklipsholderen */
+.fc .dav-event-copied {
+  outline: 2px dashed #34d399 !important;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.45) !important;
+}
+
+/* Markering af klippet begivenhed i udklipsholderen */
+.fc .dav-event-cut {
+  outline: 2px dashed #fbbf24 !important;
+  outline-offset: 1px;
+  opacity: 0.65 !important;
 }
 
 /* Kollisions-advarsel på tværs af kalendere */

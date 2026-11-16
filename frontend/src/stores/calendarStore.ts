@@ -32,6 +32,15 @@ export interface ToastMessage {
   detail?: string;
 }
 
+/**
+ * Sikker dyb kloning der fjerner alle Vue 3 Reactive Proxies (også indlejrede arrays som attendees),
+ * så hverken kloning eller IndexedDB (Dexie) nogensinde kaster DataCloneError.
+ */
+export function clonePlain<T>(obj: T): T {
+  if (obj === null || obj === undefined) return obj;
+  return JSON.parse(JSON.stringify(obj));
+}
+
 export const useCalendarStore = defineStore('calendar', () => {
   // --- State ---
   const session = ref<AuthSession | null>(null);
@@ -83,7 +92,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     title: string,
     detail?: string,
     type: ToastMessage['type'] = 'info',
-    durationMs = 4200
+    durationMs = 4500
   ) {
     const id = crypto.randomUUID();
     toasts.value.push({ id, title, detail, type });
@@ -120,13 +129,23 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   /**
    * Mødesikkerhed / Spam-beskyttelse:
-   * Returnerer true, hvis begivenheden indeholder andre inviterede deltagere.
+   * Returnerer true, hvis begivenheden indeholder andre inviterede deltagere end brugeren selv.
    */
   function hasInvitedAttendees(ev: CalendarEvent): boolean {
     if (!ev.attendees || ev.attendees.length === 0) return false;
-    const currentUser = session.value?.username?.toLowerCase().trim();
-    if (!currentUser) return ev.attendees.length > 0;
-    return ev.attendees.some((a) => a.email.toLowerCase().trim() !== currentUser);
+    const currentUser = (session.value?.username || '').toLowerCase().trim();
+    const currentLocalPart = currentUser.split('@')[0];
+
+    const externalGuests = ev.attendees.filter((a) => {
+      const email = (a.email || '').toLowerCase().trim();
+      if (!email) return false;
+      if (currentUser && (email === currentUser || email.split('@')[0] === currentLocalPart)) {
+        return false;
+      }
+      return true;
+    });
+
+    return externalGuests.length > 0;
   }
 
   // --- Computed ---
@@ -148,6 +167,10 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   const visibleEvents = computed(() =>
     events.value.filter((ev) => visibleCalendarIds.value.has(ev.calendarId))
+  );
+
+  const clipboardEventIds = computed(() =>
+    new Set(clipboard.value.events.map((e) => e.id))
   );
 
   /**
@@ -214,7 +237,6 @@ export const useCalendarStore = defineStore('calendar', () => {
     trashItems.value = await db.trash.orderBy('deletedAt').reverse().toArray();
     syncQueue.value = await db.syncQueue.toArray();
 
-    // Tjek gemt session
     try {
       const savedSession = localStorage.getItem(SESSION_STORAGE_KEY);
       if (savedSession) {
@@ -235,7 +257,6 @@ export const useCalendarStore = defineStore('calendar', () => {
         activeTargetCalendarId.value = writableCalendars.value[0].id;
       }
     } else {
-      // Start i Demo/Mock-tilstand første gang, så appen virker øjeblikkeligt
       await activateDemoMode(false);
     }
 
@@ -271,9 +292,9 @@ export const useCalendarStore = defineStore('calendar', () => {
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(demoSession));
 
     if (resetData || (await db.calendars.count()) === 0) {
-      const demoCals = getDemoCalendars();
+      const demoCals = clonePlain(getDemoCalendars());
       applyColorOverridesToCalendars(demoCals);
-      const demoEvs = getDemoEvents();
+      const demoEvs = clonePlain(getDemoEvents());
 
       await db.transaction('rw', db.calendars, db.events, db.syncQueue, async () => {
         await db.calendars.clear();
@@ -341,21 +362,24 @@ export const useCalendarStore = defineStore('calendar', () => {
       const res = await apiSyncCalDav(session.value);
 
       const visibilityMap = new Map(calendars.value.map((c) => [c.id, c.visible]));
-      const mergedCalendars: CalendarSource[] = res.calendars.map((c) => ({
-        ...c,
-        visible: visibilityMap.has(c.id) ? Boolean(visibilityMap.get(c.id)) : true
-      }));
+      const mergedCalendars: CalendarSource[] = clonePlain(
+        res.calendars.map((c) => ({
+          ...c,
+          visible: visibilityMap.has(c.id) ? Boolean(visibilityMap.get(c.id)) : true
+        }))
+      );
       applyColorOverridesToCalendars(mergedCalendars);
+      const plainEvents = clonePlain(res.events);
 
       await db.transaction('rw', db.calendars, db.events, async () => {
         await db.calendars.clear();
         await db.events.clear();
         await db.calendars.bulkPut(mergedCalendars);
-        await db.events.bulkPut(res.events);
+        await db.events.bulkPut(plainEvents);
       });
 
       calendars.value = mergedCalendars;
-      events.value = res.events;
+      events.value = plainEvents;
       lastSyncedAt.value = res.syncedAt;
 
       if (!activeTargetCalendarId.value && writableCalendars.value[0]) {
@@ -363,7 +387,7 @@ export const useCalendarStore = defineStore('calendar', () => {
       }
 
       if (!silent) {
-        notify('Kalendere synkroniseret', `Hentede ${res.events.length} begivenheder fra Mailcow/SOGo.`, 'success');
+        notify('Kalendere synkroniseret', `Hentede ${plainEvents.length} begivenheder fra Mailcow/SOGo.`, 'success');
       }
     } catch (err: any) {
       if (!silent) {
@@ -378,10 +402,10 @@ export const useCalendarStore = defineStore('calendar', () => {
   async function enqueueSync(item: Omit<SyncQueueItem, 'id' | 'createdAt'>) {
     if (session.value?.mode !== 'CALDAV') return;
 
-    const entry: SyncQueueItem = {
+    const entry: SyncQueueItem = clonePlain({
       ...item,
       createdAt: new Date().toISOString()
-    };
+    });
     const id = await db.syncQueue.add(entry);
     syncQueue.value.push({ ...entry, id });
 
@@ -398,7 +422,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     for (const item of queue) {
       try {
         if (item.action === 'UPSERT' && item.payload.event) {
-          const saved = await apiSaveEvent(session.value, item.payload.event);
+          const saved = clonePlain(await apiSaveEvent(session.value, item.payload.event));
           await db.events.put({ ...saved, pendingSync: false });
           const idx = events.value.findIndex((e) => e.id === item.eventId || e.id === saved.id);
           if (idx !== -1) {
@@ -407,7 +431,9 @@ export const useCalendarStore = defineStore('calendar', () => {
         } else if (item.action === 'DELETE' && item.payload.caldavUrl) {
           await apiDeleteEvent(session.value, item.payload.caldavUrl, item.payload.etag);
         } else if (item.action === 'RSVP' && item.payload.event && item.payload.partstat) {
-          const updated = await apiUpdateRsvp(session.value, item.payload.event, item.payload.partstat);
+          const updated = clonePlain(
+            await apiUpdateRsvp(session.value, item.payload.event, item.payload.partstat)
+          );
           await db.events.put({ ...updated, pendingSync: false });
           const idx = events.value.findIndex((e) => e.id === updated.id);
           if (idx !== -1) {
@@ -432,7 +458,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     const cal = getCalendarById(calId);
     if (!cal) return;
     cal.visible = !cal.visible;
-    await db.calendars.put({ ...cal });
+    await db.calendars.put(clonePlain(cal));
   }
 
   async function setCalendarColorOverride(calId: string, newColor: string | null) {
@@ -449,7 +475,7 @@ export const useCalendarStore = defineStore('calendar', () => {
       cal.color = cal.serverColor;
     }
     saveColorOverrides(overrides);
-    await db.calendars.put({ ...cal });
+    await db.calendars.put(clonePlain(cal));
   }
 
   // --- CRUD på Begivenheder + Undo (Ctrl+Z) + Papirkurv ---
@@ -489,12 +515,12 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
 
     const existing = eventInput.id ? events.value.find((e) => e.id === eventInput.id) : undefined;
-    const previousSnapshot = existing ? structuredClone(existing) : null;
+    const previousSnapshot = existing ? clonePlain(existing) : null;
 
     const uid = eventInput.uid || existing?.uid || crypto.randomUUID();
     const id = `${eventInput.calendarId}::${uid}`;
 
-    const fullEvent: CalendarEvent = {
+    const fullEvent: CalendarEvent = clonePlain({
       id,
       uid,
       calendarId: eventInput.calendarId,
@@ -506,17 +532,19 @@ export const useCalendarStore = defineStore('calendar', () => {
       location: eventInput.location ?? existing?.location ?? '',
       videoUrl: eventInput.videoUrl ?? existing?.videoUrl ?? '',
       timezone: eventInput.timezone || existing?.timezone || 'Europe/Copenhagen',
-      attendees: eventInput.attendees ? [...eventInput.attendees] : (existing?.attendees ? [...existing.attendees] : []),
+      attendees: eventInput.attendees ?? existing?.attendees ?? [],
       organizer: eventInput.organizer ?? existing?.organizer,
-      reminderMinutes: eventInput.reminderMinutes !== undefined ? eventInput.reminderMinutes : (existing?.reminderMinutes ?? 15),
-      etag: existing?.etag,
-      caldavUrl: existing?.caldavUrl,
-      rawIcs: existing?.rawIcs,
+      reminderMinutes:
+        eventInput.reminderMinutes !== undefined
+          ? eventInput.reminderMinutes
+          : (existing?.reminderMinutes ?? 15),
+      etag: eventInput.etag !== undefined ? eventInput.etag : existing?.etag,
+      caldavUrl: eventInput.caldavUrl !== undefined ? eventInput.caldavUrl : existing?.caldavUrl,
+      rawIcs: eventInput.rawIcs !== undefined ? eventInput.rawIcs : existing?.rawIcs,
       updatedAt: new Date().toISOString(),
       pendingSync: session.value?.mode === 'CALDAV'
-    };
+    });
 
-    // Hvis kalenderen blev skiftet på et eksisterende event, fjern det gamle id
     if (existing && existing.id !== fullEvent.id) {
       events.value = events.value.filter((e) => e.id !== existing.id);
       await db.events.delete(existing.id);
@@ -528,12 +556,12 @@ export const useCalendarStore = defineStore('calendar', () => {
     } else {
       events.value.push(fullEvent);
     }
-    await db.events.put(fullEvent);
+    await db.events.put(clonePlain(fullEvent));
 
     await enqueueSync({
       action: 'UPSERT',
       eventId: fullEvent.id,
-      payload: { event: fullEvent }
+      payload: { event: clonePlain(fullEvent) }
     });
 
     if (recordUndo) {
@@ -565,13 +593,13 @@ export const useCalendarStore = defineStore('calendar', () => {
       return;
     }
 
-    const snapshots = toDelete.map((e) => structuredClone(e));
+    const snapshots = toDelete.map((e) => clonePlain(e));
     const now = new Date();
     const expires = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
     const newTrashEntries: TrashItem[] = snapshots.map((ev) => ({
       id: ev.id,
-      event: ev,
+      event: clonePlain(ev),
       deletedAt: now.toISOString(),
       expiresAt: expires.toISOString()
     }));
@@ -625,13 +653,12 @@ export const useCalendarStore = defineStore('calendar', () => {
     await db.trash.delete(trashId);
     trashItems.value = trashItems.value.filter((t) => t.id !== trashId);
 
-    // Hvis den oprindelige kalender ikke længere findes eller er read-only, brug default skrivbar kalender
     const targetCalId =
       getCalendarById(item.event.calendarId) && !isCalendarReadOnly(item.event.calendarId)
         ? item.event.calendarId
         : defaultWritableCalendar.value?.id || item.event.calendarId;
 
-    await saveEvent({ ...item.event, calendarId: targetCalId }, false);
+    await saveEvent({ ...clonePlain(item.event), calendarId: targetCalId }, false);
     notify('Begivenhed gendannet', `"${item.event.title}" er tilbage i kalenderen.`, 'success');
   }
 
@@ -647,6 +674,15 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   // --- Ægte Copy / Cut / Paste på tværs af dage ---
+  function clearClipboard() {
+    clipboard.value = {
+      mode: null,
+      events: [],
+      sourceAnchorDate: null,
+      copiedAt: null
+    };
+  }
+
   function copyOrCutSelection(mode: 'COPY' | 'CUT', explicitEvents?: CalendarEvent[]) {
     let candidates: CalendarEvent[] = [];
 
@@ -656,15 +692,14 @@ export const useCalendarStore = defineStore('calendar', () => {
       const idSet = new Set(selectedEventIds.value);
       candidates = events.value.filter((e) => idSet.has(e.id));
     } else if (selectedDateStr.value) {
-      // Hvis en dag er valgt uden specifikke events, kopieres dagens synlige begivenheder
       const dayPrefix = selectedDateStr.value.slice(0, 10);
       candidates = visibleEvents.value.filter((e) => toDateOnlyString(new Date(e.start)) === dayPrefix);
     }
 
     if (candidates.length === 0) {
       notify(
-        'Ingen begivenheder valgt',
-        'Klik på en begivenhed (eller en dag med begivenheder) før du trykker Ctrl+C / Ctrl+X.',
+        'Ingen begivenhed valgt',
+        'Klik først på en begivenhed (eller en dag med begivenheder), og tryk derefter Ctrl+C.',
         'warning'
       );
       return;
@@ -677,13 +712,12 @@ export const useCalendarStore = defineStore('calendar', () => {
     if (blockedMeetings.length > 0 && allowed.length === 0) {
       notify(
         'Kopiering spærret (Mødesikkerhed)',
-        `"${blockedMeetings[0].title}" har inviterede mødedeltagere. Ctrl+C er deaktiveret for at forhindre utilsigtet mødespam.`,
+        `"${blockedMeetings[0].title}" indeholder inviterede mødedeltagere. Ctrl+C er deaktiveret på møder med gæster.`,
         'error'
       );
       return;
     }
 
-    // Ved Klip (Ctrl+X) må begivenheden ikke ligge i en Read-Only kalender
     const finalEvents =
       mode === 'CUT'
         ? allowed.filter((e) => !isCalendarReadOnly(e.calendarId))
@@ -702,24 +736,30 @@ export const useCalendarStore = defineStore('calendar', () => {
       (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
     );
     const anchorDate = toDateOnlyString(new Date(sorted[0].start));
+    const plainCopied = sorted.map((e) => clonePlain(e));
 
     clipboard.value = {
       mode,
-      events: sorted.map((e) => structuredClone(e)),
+      events: plainCopied,
       sourceAnchorDate: anchorDate,
       copiedAt: new Date().toISOString()
     };
 
     const skippedNotice =
       blockedMeetings.length > 0
-        ? ` (${blockedMeetings.length} møde med deltagere blev sprunget over pga. mødesikkerhed)`
+        ? ` (${blockedMeetings.length} møde med deltagere blev sprunget over)`
         : '';
+
+    const titleSummary =
+      plainCopied.length === 1
+        ? `"${plainCopied[0].title}"`
+        : `${plainCopied.length} begivenheder`;
 
     notify(
       mode === 'COPY'
-        ? `${sorted.length} begivenhed(er) kopieret (Ctrl+C)`
-        : `${sorted.length} begivenhed(er) klippet (Ctrl+X)`,
-      `Klik på en ny dato og tryk Ctrl+V for at indsætte${skippedNotice}.`,
+        ? `Kopieret: ${titleSummary}`
+        : `Klippet: ${titleSummary}`,
+      `Klik på en ny dag i kalenderen og tryk Ctrl+V (eller højreklik -> Indsæt)${skippedNotice}.`,
       'success'
     );
   }
@@ -743,11 +783,10 @@ export const useCalendarStore = defineStore('calendar', () => {
     const createdIds: string[] = [];
     const cutOriginalSnapshots =
       clipboard.value.mode === 'CUT'
-        ? clipboard.value.events.map((e) => structuredClone(e))
+        ? clipboard.value.events.map((e) => clonePlain(e))
         : [];
 
     for (const srcEvent of clipboard.value.events) {
-      // Vælg mål-kalender: brug oprindelig kalender hvis den er skrivbar, ellers defaultWritableCalendar
       let targetCalId = srcEvent.calendarId;
       if (isCalendarReadOnly(targetCalId)) {
         if (!defaultWritableCalendar.value) {
@@ -765,14 +804,16 @@ export const useCalendarStore = defineStore('calendar', () => {
       let newEndIso: string;
 
       if (srcEvent.allDay) {
-        const shiftedStart = addDaysToDateOnly(srcEvent.start.slice(0, 10), dayDiff);
-        const origEnd = srcEvent.end ? srcEvent.end.slice(0, 10) : srcEvent.start.slice(0, 10);
-        const durationDays = Math.max(1, diffDaysBetween(srcEvent.start.slice(0, 10), origEnd));
+        const srcStartYmd = toDateOnlyString(new Date(srcEvent.start));
+        const srcEndYmd = srcEvent.end
+          ? toDateOnlyString(new Date(srcEvent.end))
+          : srcStartYmd;
+        const shiftedStart = addDaysToDateOnly(srcStartYmd, dayDiff);
+        const durationDays = Math.max(1, diffDaysBetween(srcStartYmd, srcEndYmd));
         const shiftedEnd = addDaysToDateOnly(shiftedStart, durationDays);
         newStartIso = shiftedStart;
         newEndIso = shiftedEnd;
       } else if (hasSpecificTargetTime) {
-        // Hvis der indsættes i Uge/Dag-visning på et specifikt klokkeslæt
         const durationMs = Math.max(
           15 * 60 * 1000,
           new Date(srcEvent.end).getTime() - new Date(srcEvent.start).getTime()
@@ -782,15 +823,16 @@ export const useCalendarStore = defineStore('calendar', () => {
         newStartIso = startDt.toISOString();
         newEndIso = endDt.toISOString();
       } else {
-        // Bevar nøjagtigt klokkeslæt på tværs af dage (vagtplanlægning / time-blocking)
         const startDt = new Date(srcEvent.start);
-        const endDt = new Date(srcEvent.end);
+        const endDt = new Date(srcEvent.end || srcEvent.start);
+        const durationMs = Math.max(15 * 60 * 1000, endDt.getTime() - startDt.getTime());
         startDt.setDate(startDt.getDate() + dayDiff);
-        endDt.setDate(endDt.getDate() + dayDiff);
+        const newEndDt = new Date(startDt.getTime() + durationMs);
         newStartIso = startDt.toISOString();
-        newEndIso = endDt.toISOString();
+        newEndIso = newEndDt.toISOString();
       }
 
+      // Bemærk: Ved kopiering nulstilles uid, caldavUrl, etag og rawIcs, så SOGo opretter en helt ny VEVENT!
       const created = await saveEvent(
         {
           calendarId: targetCalId,
@@ -802,8 +844,12 @@ export const useCalendarStore = defineStore('calendar', () => {
           location: srcEvent.location,
           videoUrl: srcEvent.videoUrl,
           timezone: srcEvent.timezone,
-          attendees: [], // Kopierede vagter/blokke starter altid uden deltagere
-          reminderMinutes: srcEvent.reminderMinutes
+          attendees: [],
+          reminderMinutes: srcEvent.reminderMinutes,
+          uid: undefined,
+          caldavUrl: undefined,
+          etag: undefined,
+          rawIcs: undefined
         },
         false
       );
@@ -848,7 +894,7 @@ export const useCalendarStore = defineStore('calendar', () => {
 
     const userEmail = (session.value?.username || 'carsten@demo.dk').toLowerCase().trim();
     const updatedAttendees = (ev.attendees || []).map((a) =>
-      a.email.toLowerCase().trim() === userEmail ? { ...a, partstat } : a
+      a.email.toLowerCase().trim() === userEmail ? { ...a, partstat } : clonePlain(a)
     );
 
     if (!updatedAttendees.some((a) => a.email.toLowerCase().trim() === userEmail)) {
@@ -859,27 +905,27 @@ export const useCalendarStore = defineStore('calendar', () => {
       });
     }
 
-    const updatedEvent: CalendarEvent = {
+    const updatedEvent: CalendarEvent = clonePlain({
       ...ev,
       attendees: updatedAttendees,
       updatedAt: new Date().toISOString(),
       pendingSync: session.value?.mode === 'CALDAV'
-    };
+    });
 
     const idx = events.value.findIndex((e) => e.id === eventId);
     if (idx !== -1) {
       events.value[idx] = updatedEvent;
     }
-    await db.events.put(updatedEvent);
+    await db.events.put(clonePlain(updatedEvent));
 
     if (editingEvent.value?.id === eventId) {
-      editingEvent.value = updatedEvent;
+      editingEvent.value = clonePlain(updatedEvent);
     }
 
     await enqueueSync({
       action: 'RSVP',
       eventId: updatedEvent.id,
-      payload: { event: updatedEvent, partstat }
+      payload: { event: clonePlain(updatedEvent), partstat }
     });
 
     const labelMap: Record<RsvpStatus, string> = {
@@ -895,12 +941,13 @@ export const useCalendarStore = defineStore('calendar', () => {
   // --- Kontekstmenu & Modal hjælpere ---
   function openContextMenu(payload: Omit<ContextMenuState, 'visible'>) {
     const menuWidth = 260;
-    const menuHeight = 310;
+    const menuHeight = 320;
     const x = Math.min(payload.x, window.innerWidth - menuWidth - 12);
     const y = Math.min(payload.y, window.innerHeight - menuHeight - 12);
 
     contextMenu.value = {
       ...payload,
+      event: payload.event ? clonePlain(payload.event) : null,
       x: Math.max(8, x),
       y: Math.max(8, y),
       visible: true
@@ -954,7 +1001,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   function openEditEventModal(ev: CalendarEvent) {
-    editingEvent.value = structuredClone(ev);
+    editingEvent.value = clonePlain(ev);
     isEventModalOpen.value = true;
   }
 
@@ -987,6 +1034,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     writableCalendars,
     defaultWritableCalendar,
     visibleEvents,
+    clipboardEventIds,
     searchResults,
     collisionEventIds,
 
@@ -1007,6 +1055,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     restoreFromTrash,
     permanentlyDeleteFromTrash,
     emptyTrash,
+    clearClipboard,
     copyOrCutSelection,
     pasteToDate,
     triggerUndo,

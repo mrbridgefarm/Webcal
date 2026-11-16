@@ -8,7 +8,16 @@ import EventModal from './components/EventModal.vue';
 import TrashModal from './components/TrashModal.vue';
 import LoginModal from './components/LoginModal.vue';
 import { useCalendarStore } from './stores/calendarStore';
-import { X, CheckCircle2, AlertTriangle, Info, XCircle } from 'lucide-vue-next';
+import {
+  X,
+  CheckCircle2,
+  AlertTriangle,
+  Info,
+  XCircle,
+  ClipboardPaste,
+  Copy,
+  Scissors
+} from 'lucide-vue-next';
 
 const store = useCalendarStore();
 const calendarGridRef = ref<InstanceType<typeof CalendarGrid> | null>(null);
@@ -43,7 +52,6 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
     return;
   }
 
-  // Ignorér globale kalender-genveje, hvis brugeren skriver i et tekstfelt eller en modal er åben
   if (
     isTypingInInput(e.target) ||
     store.isEventModalOpen ||
@@ -105,6 +113,52 @@ onUnmounted(() => {
         ref="calendarGridRef"
         @title-change="(t) => (currentTitle = t)"
       />
+    </div>
+
+    <!-- Svævende Udklipsholder-bjælke nederst i midten når noget er kopieret/klippet -->
+    <div
+      v-if="store.clipboard.events.length > 0"
+      class="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md border-2 border-emerald-500/60 rounded-2xl shadow-2xl px-4 py-2.5 flex items-center gap-4 text-xs"
+    >
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-300">
+          <Copy v-if="store.clipboard.mode === 'COPY'" class="w-4 h-4" />
+          <Scissors v-else class="w-4 h-4" />
+        </div>
+        <div>
+          <div class="font-semibold text-slate-100">
+            {{ store.clipboard.mode === 'CUT' ? 'Klippet:' : 'Kopieret:' }}
+            <span class="text-emerald-300">
+              {{
+                store.clipboard.events.length === 1
+                  ? store.clipboard.events[0].title
+                  : `${store.clipboard.events.length} begivenheder`
+              }}
+            </span>
+          </div>
+          <div class="text-[11px] text-slate-400">
+            Klik på ønsket dato (valgt: <strong class="text-blue-300">{{ store.selectedDateStr.slice(0, 10) }}</strong>) og tryk <kbd class="px-1 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl+V</kbd>
+          </div>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 shadow transition"
+        @click="store.pasteToDate()"
+      >
+        <ClipboardPaste class="w-3.5 h-3.5" />
+        Indsæt på {{ store.selectedDateStr.slice(0, 10) }}
+      </button>
+
+      <button
+        type="button"
+        class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
+        title="Ryd udklipsholder"
+        @click="store.clearClipboard()"
+      >
+        <X class="w-4 h-4" />
+      </button>
     </div>
 
     <!-- Custom Højrekliksmenu (overskriver browserens standardmenu) -->

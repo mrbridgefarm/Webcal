@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import FullCalendar from '@fullcalendar/vue3';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -7,12 +7,10 @@ import interactionPlugin from '@fullcalendar/interaction';
 import type {
   CalendarOptions,
   EventClickArg,
-  EventDropArg,
-  EventMountArg,
-  DayCellMountArg
+  EventDropArg
 } from '@fullcalendar/core';
 import type { DateClickArg, EventResizeDoneArg } from '@fullcalendar/interaction';
-import { Lock, Users, AlertTriangle, Video } from 'lucide-vue-next';
+import { Lock, Users, AlertTriangle, Video, Check, Copy, Scissors } from 'lucide-vue-next';
 import { useCalendarStore, toDateOnlyString } from '../stores/calendarStore';
 import type { CalendarEvent } from '../types/calendar';
 
@@ -22,6 +20,7 @@ const emit = defineEmits<{
 
 const store = useCalendarStore();
 const calendarRef = ref<InstanceType<typeof FullCalendar> | null>(null);
+const gridContainerRef = ref<HTMLElement | null>(null);
 let lastClickTime = 0;
 let lastClickedId = '';
 
@@ -29,6 +28,8 @@ const fcEvents = computed(() =>
   store.visibleEvents.map((ev) => {
     const cal = store.getCalendarById(ev.calendarId);
     const isSelected = store.selectedEventIds.includes(ev.id);
+    const isInClipboard = store.clipboardEventIds.has(ev.id);
+    const clipboardMode = isInClipboard ? store.clipboard.mode : null;
     const isCollision = store.collisionEventIds.has(ev.id);
     const isReadOnly = Boolean(cal?.readOnly);
     const hasGuests = store.hasInvitedAttendees(ev);
@@ -45,17 +46,24 @@ const fcEvents = computed(() =>
       backgroundColor: cal?.color || '#2563eb',
       borderColor: isSelected
         ? '#f8fafc'
-        : isCollision
-          ? '#f59e0b'
-          : cal?.color || '#2563eb',
+        : isInClipboard
+          ? '#34d399'
+          : isCollision
+            ? '#f59e0b'
+            : cal?.color || '#2563eb',
       classNames: [
         isSelected ? 'dav-event-selected' : '',
+        isInClipboard && clipboardMode === 'COPY' ? 'dav-event-copied' : '',
+        isInClipboard && clipboardMode === 'CUT' ? 'dav-event-cut' : '',
         isCollision ? 'dav-event-collision' : '',
         isReadOnly ? 'dav-event-readonly' : ''
       ].filter(Boolean),
       extendedProps: {
+        eventId: ev.id,
         rawEvent: ev,
         isSelected,
+        isInClipboard,
+        clipboardMode,
         isCollision,
         isReadOnly,
         hasGuests,
@@ -63,6 +71,30 @@ const fcEvents = computed(() =>
       }
     };
   })
+);
+
+/**
+ * Markerer visuelt den aktuelt valgte mål-dato (store.selectedDateStr) i FullCalendar DOM'en
+ */
+function updateSelectedDayHighlight() {
+  if (!gridContainerRef.value) return;
+  const targetYmd = (store.selectedDateStr || '').slice(0, 10);
+  const dayEls = gridContainerRef.value.querySelectorAll<HTMLElement>('.fc-daygrid-day, .fc-timegrid-col');
+  dayEls.forEach((el) => {
+    const d = el.getAttribute('data-date');
+    if (d && d === targetYmd) {
+      el.classList.add('dav-day-selected');
+    } else {
+      el.classList.remove('dav-day-selected');
+    }
+  });
+}
+
+watch(
+  () => store.selectedDateStr,
+  () => {
+    void nextTick(updateSelectedDayHighlight);
+  }
 );
 
 function handleDateClick(arg: DateClickArg) {
@@ -84,13 +116,13 @@ function handleEventClick(arg: EventClickArg) {
   arg.jsEvent.stopPropagation();
   store.closeContextMenu();
 
-  const ev = arg.event.extendedProps.rawEvent as CalendarEvent;
+  const evId = arg.event.id;
+  const ev = store.events.find((e) => e.id === evId) || (arg.event.extendedProps.rawEvent as CalendarEvent);
   if (!ev) return;
 
-  store.selectedDateStr = ev.start.slice(0, 10);
+  store.selectedDateStr = toDateOnlyString(new Date(ev.start));
 
   if (arg.jsEvent.ctrlKey || arg.jsEvent.metaKey || arg.jsEvent.shiftKey) {
-    // Multi-select med Ctrl / Shift
     if (store.selectedEventIds.includes(ev.id)) {
       store.selectedEventIds = store.selectedEventIds.filter((id) => id !== ev.id);
     } else {
@@ -110,8 +142,55 @@ function handleEventClick(arg: EventClickArg) {
   lastClickedId = `ev:${ev.id}`;
 }
 
+/**
+ * Delegated højrekliks-handler på hele kalendergitteret.
+ * Virker 100% stabilt både på begivenheder, i "+ X flere"-popovers og på tomme datoer i Måned/Uge/Dag.
+ */
+function handleGridContextMenu(e: MouseEvent) {
+  e.preventDefault();
+  const target = e.target as HTMLElement | null;
+  if (!target) return;
+
+  // 1. Tjek om brugeren højreklikkede på en begivenhed
+  const eventContentEl = target.closest<HTMLElement>('[data-dav-event-id]');
+  if (eventContentEl) {
+    const evId = eventContentEl.getAttribute('data-dav-event-id');
+    const ev = evId ? store.events.find((item) => item.id === evId) : undefined;
+    if (ev) {
+      if (!store.selectedEventIds.includes(ev.id)) {
+        store.selectedEventIds = [ev.id];
+      }
+      store.selectedDateStr = toDateOnlyString(new Date(ev.start));
+      store.openContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        targetType: 'EVENT',
+        event: ev,
+        dateStr: toDateOnlyString(new Date(ev.start))
+      });
+      return;
+    }
+  }
+
+  // 2. Ellers tjek hvilken dato-celle/kolonne der blev højreklikket på
+  const dateEl = target.closest<HTMLElement>('[data-date]');
+  const dateStr = dateEl?.getAttribute('data-date') || store.selectedDateStr;
+  if (dateStr) {
+    store.selectedDateStr = dateStr;
+  }
+
+  store.openContextMenu({
+    x: e.clientX,
+    y: e.clientY,
+    targetType: 'DATE',
+    event: null,
+    dateStr: dateStr || store.selectedDateStr,
+    allDay: true
+  });
+}
+
 async function handleEventDrop(arg: EventDropArg) {
-  const ev = arg.event.extendedProps.rawEvent as CalendarEvent;
+  const ev = store.events.find((e) => e.id === arg.event.id) || (arg.event.extendedProps.rawEvent as CalendarEvent);
   if (!ev || store.isCalendarReadOnly(ev.calendarId)) {
     arg.revert();
     store.notify(
@@ -142,7 +221,7 @@ async function handleEventDrop(arg: EventDropArg) {
 }
 
 async function handleEventResize(arg: EventResizeDoneArg) {
-  const ev = arg.event.extendedProps.rawEvent as CalendarEvent;
+  const ev = store.events.find((e) => e.id === arg.event.id) || (arg.event.extendedProps.rawEvent as CalendarEvent);
   if (!ev || store.isCalendarReadOnly(ev.calendarId)) {
     arg.revert();
     store.notify(
@@ -171,60 +250,18 @@ async function handleEventResize(arg: EventResizeDoneArg) {
   });
 }
 
-function handleEventDidMount(arg: EventMountArg) {
-  const ev = arg.event.extendedProps.rawEvent as CalendarEvent;
-  if (!ev) return;
-
-  arg.el.addEventListener('contextmenu', (e: MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (!store.selectedEventIds.includes(ev.id)) {
-      store.selectedEventIds = [ev.id];
-    }
-    store.selectedDateStr = ev.start.slice(0, 10);
-
-    store.openContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      targetType: 'EVENT',
-      event: ev,
-      dateStr: ev.start
-    });
-  });
-}
-
-function handleDayCellDidMount(arg: DayCellMountArg) {
-  const dateStr = toDateOnlyString(arg.date);
-  arg.el.dataset.dateStr = dateStr;
-
-  arg.el.addEventListener('contextmenu', (e: MouseEvent) => {
-    e.preventDefault();
-    store.selectedDateStr = dateStr;
-    store.openContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      targetType: 'DATE',
-      event: null,
-      dateStr,
-      allDay: true
-    });
-  });
-}
-
 const calendarOptions = computed<CalendarOptions>(() => ({
   plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin],
   initialView: store.currentView,
   locale: 'da',
-  firstDay: 1, // Mandag som ugens første dag
+  firstDay: 1,
   headerToolbar: false,
   height: '100%',
-  dayMaxEvents: 7, // Kravspecifikation: Plads til op til 7 synlige begivenheder pr. dag (+ X flere popover)
+  dayMaxEvents: 7,
   moreLinkText: (num: number) => `+ ${num} flere`,
   navLinks: false,
   editable: true,
-  selectable: true,
-  selectMirror: true,
+  selectable: false,
   nowIndicator: true,
   slotMinTime: '06:00:00',
   slotMaxTime: '23:00:00',
@@ -244,19 +281,18 @@ const calendarOptions = computed<CalendarOptions>(() => ({
   eventClick: handleEventClick,
   eventDrop: handleEventDrop,
   eventResize: handleEventResize,
-  eventDidMount: handleEventDidMount,
-  dayCellDidMount: handleDayCellDidMount,
   datesSet: (info) => {
     emit('title-change', info.view.title);
+    void nextTick(updateSelectedDayHighlight);
   }
 }));
 
-// Eksponér navigationsmetoder til App.vue / TopBar.vue
 function goPrev() {
   const api = calendarRef.value?.getApi();
   if (api) {
     api.prev();
     emit('title-change', api.view.title);
+    void nextTick(updateSelectedDayHighlight);
   }
 }
 
@@ -265,6 +301,7 @@ function goNext() {
   if (api) {
     api.next();
     emit('title-change', api.view.title);
+    void nextTick(updateSelectedDayHighlight);
   }
 }
 
@@ -274,6 +311,7 @@ function goToday() {
     api.today();
     store.selectedDateStr = toDateOnlyString(new Date());
     emit('title-change', api.view.title);
+    void nextTick(updateSelectedDayHighlight);
   }
 }
 
@@ -283,6 +321,7 @@ function changeView(viewName: 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay') {
   if (api) {
     api.changeView(viewName);
     emit('title-change', api.view.title);
+    void nextTick(updateSelectedDayHighlight);
   }
 }
 
@@ -291,6 +330,7 @@ function jumpToDate(dateIso: string) {
   if (api) {
     api.gotoDate(dateIso);
     emit('title-change', api.view.title);
+    void nextTick(updateSelectedDayHighlight);
   }
 }
 
@@ -299,6 +339,7 @@ onMounted(() => {
   if (api) {
     emit('title-change', api.view.title);
   }
+  void nextTick(updateSelectedDayHighlight);
 });
 
 defineExpose({
@@ -312,21 +353,35 @@ defineExpose({
 
 <template>
   <div
+    ref="gridContainerRef"
     class="flex-1 h-full bg-slate-950 p-3 overflow-hidden relative"
     @click="store.closeContextMenu()"
+    @contextmenu="handleGridContextMenu"
   >
-    <!-- Valgt mål-dato indikator i toppen af gitteret -->
+    <!-- Valgt mål-dato & markering i toppen af gitteret -->
     <div class="mb-2 flex items-center justify-between text-xs px-1 text-slate-400">
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-3 flex-wrap">
         <span>
           Aktiv mål-dato (<kbd class="px-1 py-0.5 bg-slate-800 text-slate-200 rounded text-[10px]">Ctrl+V</kbd>):
-          <strong class="text-blue-400 font-semibold ml-1">{{ store.selectedDateStr }}</strong>
+          <strong class="text-blue-400 font-semibold ml-1">{{ store.selectedDateStr.slice(0, 10) }}</strong>
         </span>
-        <span v-if="store.selectedEventIds.length > 0" class="text-emerald-400 font-medium">
-          • {{ store.selectedEventIds.length }} begivenhed(er) markeret (Dobbeltklik for at åbne / Højreklik for menu)
+        <span
+          v-if="store.selectedEventIds.length > 0"
+          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-300 font-medium text-[11px]"
+        >
+          <Check class="w-3 h-3" />
+          {{ store.selectedEventIds.length }} begivenhed(er) valgt — tryk Ctrl+C for at kopiere
+        </span>
+        <span
+          v-if="store.clipboard.events.length > 0"
+          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-semibold text-[11px]"
+        >
+          <Copy v-if="store.clipboard.mode === 'COPY'" class="w-3 h-3" />
+          <Scissors v-else class="w-3 h-3" />
+          {{ store.clipboard.events.length }} i udklipsholder ({{ store.clipboard.events[0]?.title }})
         </span>
       </div>
-      <div class="hidden md:flex items-center gap-4 text-[11px]">
+      <div class="hidden xl:flex items-center gap-4 text-[11px]">
         <span class="flex items-center gap-1 text-amber-300">
           <AlertTriangle class="w-3.5 h-3.5" /> Kollision
         </span>
@@ -343,10 +398,17 @@ defineExpose({
       <FullCalendar ref="calendarRef" :options="calendarOptions">
         <template #eventContent="arg">
           <div
-            class="w-full px-1.5 py-0.5 flex items-center justify-between gap-1 overflow-hidden text-[11px] leading-tight cursor-pointer"
-            :title="`${arg.event.title}${arg.event.extendedProps.isCollision ? ' (KOLLISION!)' : ''}${arg.event.extendedProps.hasGuests ? ' (Har mødedeltagere - Ctrl+C spærret)' : ''}`"
+            :data-dav-event-id="arg.event.id"
+            class="w-full px-1.5 py-0.5 flex items-center justify-between gap-1 overflow-hidden text-[11px] leading-tight cursor-pointer select-none"
+            :title="`${arg.event.title}${arg.event.extendedProps.isInClipboard ? ' (I UDKLIPSHOLDER)' : ''}${arg.event.extendedProps.isCollision ? ' (KOLLISION!)' : ''}${arg.event.extendedProps.hasGuests ? ' (Har mødedeltagere - Ctrl+C spærret)' : ''}`"
           >
             <div class="flex items-center gap-1 min-w-0 truncate">
+              <span
+                v-if="arg.event.extendedProps.isInClipboard"
+                class="px-1 py-0.2 rounded bg-black/40 text-emerald-300 text-[9px] font-bold uppercase shrink-0"
+              >
+                {{ arg.event.extendedProps.clipboardMode === 'CUT' ? 'KLIP' : 'KOPI' }}
+              </span>
               <span v-if="arg.timeText" class="font-semibold opacity-90 shrink-0">
                 {{ arg.timeText }}
               </span>
