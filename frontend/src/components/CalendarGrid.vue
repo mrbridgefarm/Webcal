@@ -256,9 +256,8 @@ const calendarOptions = computed<CalendarOptions>(() => ({
   height: '100%',
   expandRows: true,
   fixedWeekCount: false,
-  // Tilpasser automatisk antal synlige rækker til feltets højde, så datofeltet ALDRIG vokser sig kæmpestort
-  dayMaxEvents: true,
-  dayMaxEventRows: true,
+  // Kravspecifikation: Plads til op til 7 synlige begivenheder pr. dag, derefter "+ X flere"
+  dayMaxEvents: 7,
   // Tvinger ALLE aftaler (både tidsbestemte og heldags) til at vises med en tydelig farvet kasse rundt om
   eventDisplay: 'block',
   moreLinkText: (num: number) => `+ ${num} flere`,
@@ -417,10 +416,10 @@ defineExpose({
         <template #eventContent="arg">
           <div
             :data-dav-event-id="arg.event.id"
-            class="w-full px-1.5 py-0.5 flex items-center justify-between gap-1 overflow-hidden text-[11px] leading-tight cursor-pointer select-none rounded-[5px]"
+            class="w-full px-1.5 py-[1px] flex items-center justify-between gap-1 overflow-hidden text-[10.5px] leading-[14px] cursor-pointer select-none rounded-[4px]"
             :style="{
               backgroundColor: arg.event.extendedProps.calColor || '#06b6d4',
-              borderLeft: '3px solid rgba(255, 255, 255, 0.45)',
+              borderLeft: '3px solid rgba(255, 255, 255, 0.5)',
               boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.18)'
             }"
             :title="`${arg.event.title} — Kalender: ${arg.event.extendedProps.calendarName}${arg.event.extendedProps.isInClipboard ? ' (I UDKLIPSHOLDER)' : ''}${arg.event.extendedProps.hasGuests ? ' (Har mødedeltagere - Ctrl+C spærret)' : ''}`"
