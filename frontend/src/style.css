@@ -3,6 +3,32 @@
 @tailwind utilities;
 
 /* ==========================================================================
+   Diskret Dark-Mode Scrollbars (undgår lyse/grimme standard-rullepaneler)
+   ========================================================================== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #334155;
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #475569;
+}
+
+/* ==========================================================================
    FullCalendar Dark Theme Tilpasning til DAV-Sync Cal
    ========================================================================== */
 .fc {
@@ -117,9 +143,9 @@
   font-size: 0.85rem;
 }
 
-/* Standard højde på ugerækker så kalenderen fylder skærmen pænt, men stopper PRÆCIS under "+ X flere" når der er 7 aftaler */
+/* Standard højde på ugerækker så månedsvisningen passer til skærmen uden unødigt rullepanel, men stopper PRÆCIS under "+ X flere" når der er 7 aftaler */
 .fc .fc-daygrid-body:not(.fc-multimonth-daygrid) .fc-daygrid-day-frame {
-  min-height: calc((100vh - 142px) / 6) !important;
+  min-height: calc((100vh - 175px) / 6) !important;
   padding-bottom: 2px !important;
 }
 
