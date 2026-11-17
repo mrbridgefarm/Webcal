@@ -42,15 +42,15 @@ function buildAuthHeaders(session: AuthSession): Record<string, string> {
   };
 }
 
-export async function apiGetServerConfig(): Promise<{ defaultServerUrl: string }> {
+export async function apiGetServerConfig(): Promise<{ hasDefaultServer: boolean }> {
   try {
     const res = await fetch('/api/caldav/config');
     const data = await res.json();
     return {
-      defaultServerUrl: data?.defaultServerUrl || ''
+      hasDefaultServer: Boolean(data?.hasDefaultServer)
     };
   } catch {
-    return { defaultServerUrl: '' };
+    return { hasDefaultServer: true };
   }
 }
 

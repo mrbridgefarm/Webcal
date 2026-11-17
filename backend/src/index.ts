@@ -25,7 +25,7 @@ app.get('/api/health', (_req, res) => {
     service: 'dav-sync-cal',
     arch: process.arch,
     platform: process.platform,
-    defaultCaldavUrl: process.env.DEFAULT_CALDAV_URL || '',
+    hasDefaultCaldavUrl: Boolean(process.env.DEFAULT_CALDAV_URL),
     timestamp: new Date().toISOString()
   });
 });

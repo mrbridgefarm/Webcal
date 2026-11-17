@@ -51,12 +51,12 @@ function extractCredentials(req: Request): CalDavCredentials {
 
 /**
  * GET /api/caldav/config
- * Returnerer serverens konfigurerede DEFAULT_CALDAV_URL fra .env / compose.yaml.
+ * Fortæller kun om DEFAULT_CALDAV_URL er sat i .env (afslører ALDRIG selve server-adressen).
  */
 caldavRouter.get('/config', (_req: Request, res: Response) => {
   res.json({
     ok: true,
-    defaultServerUrl: process.env.DEFAULT_CALDAV_URL || ''
+    hasDefaultServer: Boolean(process.env.DEFAULT_CALDAV_URL && process.env.DEFAULT_CALDAV_URL.trim())
   });
 });
 
@@ -66,13 +66,15 @@ caldavRouter.get('/config', (_req: Request, res: Response) => {
  */
 caldavRouter.post('/login', async (req: Request, res: Response) => {
   try {
+    const customServerProvided = Boolean(req.body?.serverUrl && String(req.body.serverUrl).trim());
     const creds = extractCredentials(req);
     const normalizedUrl = normalizeMailcowUrl(creds.serverUrl);
     const calendars = await fetchCalendars(creds);
 
     res.json({
       ok: true,
-      serverUrl: normalizedUrl,
+      // Hvis brugeren logger ind via .env standardserveren, sendes URL'en ikke tilbage til klienten
+      serverUrl: customServerProvided ? normalizedUrl : '',
       username: creds.username,
       calendars
     });

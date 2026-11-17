@@ -5,7 +5,7 @@ import { useCalendarStore } from '../stores/calendarStore';
 
 const store = useCalendarStore();
 
-const serverUrl = ref('');
+const customServerUrl = ref('');
 const username = ref('');
 const password = ref('');
 const errorMsg = ref('');
@@ -14,32 +14,43 @@ const showCustomServerField = ref(false);
 const canCloseModal = computed(() => store.isAuthenticated);
 
 watch(
-  () => [store.isLoginModalOpen, store.defaultServerUrl, store.session] as const,
+  () => [store.isLoginModalOpen, store.hasDefaultServer, store.session] as const,
   () => {
-    if (store.session?.mode === 'CALDAV' && store.session.serverUrl) {
-      serverUrl.value = store.session.serverUrl;
+    if (store.session?.mode === 'CALDAV') {
       username.value = store.session.username;
-    } else if (store.defaultServerUrl) {
-      serverUrl.value = store.defaultServerUrl;
+      customServerUrl.value = store.session.serverUrl || '';
+      showCustomServerField.value = Boolean(store.session.serverUrl);
+    } else {
+      customServerUrl.value = '';
+      // Vis kun server-feltet automatisk hvis DEFAULT_CALDAV_URL slet ikke er sat i .env
+      showCustomServerField.value = !store.hasDefaultServer;
     }
   },
   { immediate: true }
 );
 
+function toggleCustomServer() {
+  showCustomServerField.value = !showCustomServerField.value;
+  if (!showCustomServerField.value) {
+    customServerUrl.value = '';
+  }
+}
+
 async function handleLogin() {
   errorMsg.value = '';
-  const effectiveUrl = serverUrl.value.trim() || store.defaultServerUrl;
-  if (!effectiveUrl) {
-    errorMsg.value = 'Angiv venligst Mailcow / SOGo Server URL (eller sæt DEFAULT_CALDAV_URL i .env).';
+  const effectiveCustomUrl = showCustomServerField.value ? customServerUrl.value.trim() : '';
+
+  if (!effectiveCustomUrl && !store.hasDefaultServer) {
+    errorMsg.value = 'Angiv venligst en serveradresse (eller sæt DEFAULT_CALDAV_URL i .env).';
     showCustomServerField.value = true;
     return;
   }
 
   try {
-    await store.loginToMailcow(effectiveUrl, username.value, password.value);
+    await store.loginToMailcow(effectiveCustomUrl, username.value, password.value);
     password.value = '';
   } catch (err: any) {
-    errorMsg.value = err?.message || 'Kunne ikke oprette forbindelse til Mailcow/SOGo.';
+    errorMsg.value = err?.message || 'Kunne ikke logge ind. Kontrollér e-mail og adgangskode.';
   }
 }
 
@@ -68,7 +79,7 @@ function tryClose() {
                 Log ind på DAV-Sync Cal
               </h3>
               <p class="text-[11px] text-slate-400">
-                Kræver dit Mailcow / SOGo login
+                Indtast dine kontooplysninger for at fortsætte
               </p>
             </div>
           </div>
@@ -91,52 +102,20 @@ function tryClose() {
             <span>{{ errorMsg }}</span>
           </div>
 
-          <!-- Hvis DEFAULT_CALDAV_URL er sat i .env, vises den som forudkonfigureret -->
-          <div
-            v-if="store.defaultServerUrl && !showCustomServerField"
-            class="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2"
-          >
-            <div class="flex items-center gap-2 min-w-0">
-              <Server class="w-4 h-4 text-emerald-400 shrink-0" />
-              <div class="min-w-0">
-                <div class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
-                  Mailcow Server (.env)
-                </div>
-                <div class="text-xs text-slate-200 font-medium truncate">
-                  {{ store.defaultServerUrl }}
-                </div>
-              </div>
-            </div>
-            <button
-              type="button"
-              class="text-[11px] text-blue-400 hover:underline shrink-0"
-              @click="showCustomServerField = true"
-            >
-              Skift server
-            </button>
-          </div>
-
-          <!-- Server URL felt (vises hvis DEFAULT_CALDAV_URL ikke er sat i .env eller brugeren klikker "Skift server") -->
-          <div v-else>
-            <label class="flex items-center gap-1.5 text-slate-300 font-medium mb-1">
-              <Globe class="w-3.5 h-3.5 text-blue-400" /> Mailcow / SOGo Server URL
-            </label>
-            <input
-              v-model="serverUrl"
-              type="text"
-              required
-              placeholder="Indtast serveradresse (f.eks. https://mail.domæne.dk/SOGo/dav/)"
-              class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
-            />
-            <p class="text-[11px] text-slate-500 mt-1">
-              Tip: Sæt <code>DEFAULT_CALDAV_URL</code> i din <code>.env</code> / <code>compose.yaml</code>, så serveren vælges automatisk.
-            </p>
-          </div>
-
           <div>
-            <label class="flex items-center gap-1.5 text-slate-300 font-medium mb-1">
-              <Mail class="w-3.5 h-3.5 text-blue-400" /> E-mailadresse (Mailcow login)
-            </label>
+            <div class="flex items-center justify-between mb-1">
+              <label class="flex items-center gap-1.5 text-slate-300 font-medium">
+                <Mail class="w-3.5 h-3.5 text-blue-400" /> E-mailadresse
+              </label>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-blue-400 transition"
+                @click="toggleCustomServer"
+              >
+                <Server class="w-3 h-3" />
+                {{ showCustomServerField ? 'Brug standardserver' : 'Skift server' }}
+              </button>
+            </div>
             <input
               v-model="username"
               type="email"
@@ -144,6 +123,20 @@ function tryClose() {
               autofocus
               placeholder="Indtast mailadresse"
               class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <!-- Vises kun hvis man aktivt klikker "Skift server" (standardserveren fra .env vises aldrig) -->
+          <div v-if="showCustomServerField" class="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1.5">
+            <label class="flex items-center gap-1.5 text-slate-300 font-medium">
+              <Globe class="w-3.5 h-3.5 text-blue-400" /> Alternativ CalDAV Server URL
+            </label>
+            <input
+              v-model="customServerUrl"
+              type="text"
+              required
+              placeholder="Indtast serveradresse"
+              class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-blue-500"
             />
           </div>
 
@@ -165,7 +158,7 @@ function tryClose() {
             :disabled="store.isSyncing"
             class="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold shadow transition"
           >
-            {{ store.isSyncing ? 'Logger ind på Mailcow...' : 'Log ind på Mailcow' }}
+            {{ store.isSyncing ? 'Logger ind...' : 'Log ind' }}
           </button>
         </form>
       </div>

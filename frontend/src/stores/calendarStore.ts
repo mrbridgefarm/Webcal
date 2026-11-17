@@ -82,7 +82,7 @@ export function generateId(): string {
 
 export const useCalendarStore = defineStore('calendar', () => {
   // --- State ---
-  const defaultServerUrl = ref<string>('');
+  const hasDefaultServer = ref<boolean>(true);
   const session = ref<AuthSession | null>(null);
   const calendars = ref<CalendarSource[]>([]);
   const events = ref<CalendarEvent[]>([]);
@@ -272,9 +272,9 @@ export const useCalendarStore = defineStore('calendar', () => {
       return;
     }
 
-    // 2. Hent serverens DEFAULT_CALDAV_URL fra .env
+    // 2. Tjek om serveren har DEFAULT_CALDAV_URL konfigureret i .env (uden at udstille selve URL'en)
     const cfg = await apiGetServerConfig();
-    defaultServerUrl.value = cfg.defaultServerUrl || '';
+    hasDefaultServer.value = cfg.hasDefaultServer;
 
     // 3. Tjek gemt Mailcow-session
     try {
@@ -375,14 +375,14 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   // --- Login & Logout mod Mailcow ---
-  async function loginToMailcow(serverUrl: string, username: string, password: string) {
+  async function loginToMailcow(customServerUrl: string, username: string, password: string) {
     isSyncing.value = true;
     try {
-      const targetUrl = serverUrl.trim() || defaultServerUrl.value;
+      const targetUrl = customServerUrl.trim();
       const loginRes = await apiLoginCalDav(targetUrl, username, password);
       const newSession: AuthSession = {
         mode: 'CALDAV',
-        serverUrl: loginRes.serverUrl,
+        serverUrl: targetUrl ? loginRes.serverUrl : '',
         username: loginRes.username,
         password,
         connectedAt: new Date().toISOString()
@@ -1312,7 +1312,7 @@ export const useCalendarStore = defineStore('calendar', () => {
 
   return {
     // State
-    defaultServerUrl,
+    hasDefaultServer,
     session,
     calendars,
     events,
