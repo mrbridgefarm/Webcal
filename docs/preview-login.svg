@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" width="100%" height="100%" font-family="Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#020617"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="45%" r="45%">
+      <stop offset="0%" stop-color="#1d4ed8" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="modalShadow" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="20" stdDeviation="24" flood-color="#000000" flood-opacity="0.75"/>
+    </filter>
+  </defs>
+
+  <!-- Full-screen Dark Backdrop -->
+  <rect width="1280" height="760" rx="18" fill="url(#bgGrad)" stroke="#1e293b" stroke-width="2"/>
+  <rect width="1280" height="760" rx="18" fill="url(#glow)"/>
+
+  <!-- Subtle Background Grid Hint (blurred/dimmed behind modal) -->
+  <g opacity="0.16">
+    <rect x="0" y="0" width="1280" height="60" fill="#0f172a"/>
+    <line x1="260" y1="60" x2="260" y2="760" stroke="#334155" stroke-width="1"/>
+    <line x1="260" y1="200" x2="1280" y2="200" stroke="#334155" stroke-width="1"/>
+    <line x1="260" y1="340" x2="1280" y2="340" stroke="#334155" stroke-width="1"/>
+    <line x1="260" y1="480" x2="1280" y2="480" stroke="#334155" stroke-width="1"/>
+    <line x1="260" y1="620" x2="1280" y2="620" stroke="#334155" stroke-width="1"/>
+    <line x1="430" y1="60" x2="430" y2="760" stroke="#334155" stroke-width="1"/>
+    <line x1="600" y1="60" x2="600" y2="760" stroke="#334155" stroke-width="1"/>
+    <line x1="770" y1="60" x2="770" y2="760" stroke="#334155" stroke-width="1"/>
+    <line x1="940" y1="60" x2="940" y2="760" stroke="#334155" stroke-width="1"/>
+    <line x1="1110" y1="60" x2="1110" y2="760" stroke="#334155" stroke-width="1"/>
+  </g>
+
+  <!-- Centered Login Modal (max-w-md = 448px wide) -->
+  <g filter="url(#modalShadow)">
+    <rect x="416" y="185" width="448" height="390" rx="18" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+  </g>
+
+  <!-- Modal Header -->
+  <line x1="416" y1="256" x2="864" y2="256" stroke="#1e293b" stroke-width="1.5"/>
+  <rect x="438" y="203" width="36" height="36" rx="9" fill="#1e3a8a" fill-opacity="0.5" stroke="#3b82f6" stroke-opacity="0.6" stroke-width="1.2"/>
+  <rect x="446" y="212" width="20" height="18" rx="3" fill="none" stroke="#60a5fa" stroke-width="1.8"/>
+  <line x1="446" y1="218" x2="466" y2="218" stroke="#60a5fa" stroke-width="1.8"/>
+  <line x1="451" y1="209" x2="451" y2="213" stroke="#60a5fa" stroke-width="1.8" stroke-linecap="round"/>
+  <line x1="461" y1="209" x2="461" y2="213" stroke="#60a5fa" stroke-width="1.8" stroke-linecap="round"/>
+
+  <text x="486" y="218" fill="#f1f5f9" font-size="16" font-weight="700">Log ind på DAV-Sync Cal</text>
+  <text x="486" y="236" fill="#94a3b8" font-size="11.5">Indtast dine kontooplysninger for at fortsætte</text>
+
+  <!-- Form Body -->
+  <!-- Email Label & "Skift server" toggle -->
+  <rect x="438" y="278" width="14" height="10" rx="2" fill="none" stroke="#60a5fa" stroke-width="1.5"/>
+  <polyline points="438,279 445,284 452,279" fill="none" stroke="#60a5fa" stroke-width="1.5"/>
+  <text x="458" y="287" fill="#cbd5e1" font-size="12" font-weight="600">E-mailadresse</text>
+
+  <!-- Skift server button (right-aligned) -->
+  <rect x="758" y="274" width="10" height="4" rx="1" fill="none" stroke="#94a3b8" stroke-width="1.2"/>
+  <rect x="758" y="280" width="10" height="4" rx="1" fill="none" stroke="#94a3b8" stroke-width="1.2"/>
+  <text x="773" y="286" fill="#94a3b8" font-size="11.5" font-weight="500">Skift server</text>
+
+  <!-- Email Input -->
+  <rect x="438" y="296" width="404" height="40" rx="12" fill="#020617" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="452" y="320" fill="#64748b" font-size="12.5">Indtast mailadresse</text>
+
+  <!-- Password Label -->
+  <circle cx="444" cy="364" r="4" fill="none" stroke="#60a5fa" stroke-width="1.5"/>
+  <line x1="448" y1="364" x2="454" y2="364" stroke="#60a5fa" stroke-width="1.5"/>
+  <line x1="452" y1="364" x2="452" y2="367" stroke="#60a5fa" stroke-width="1.5"/>
+  <text x="459" y="368" fill="#cbd5e1" font-size="12" font-weight="600">Adgangskode / App-adgangskode</text>
+
+  <!-- Password Input -->
+  <rect x="438" y="377" width="404" height="40" rx="12" fill="#020617" stroke="#334155" stroke-width="1.5"/>
+  <text x="452" y="402" fill="#64748b" font-size="13" letter-spacing="2">••••••••••••••••</text>
+
+  <!-- Security / Hidden Server Indicator Pill -->
+  <rect x="438" y="432" width="404" height="32" rx="10" fill="#064e3b" fill-opacity="0.22" stroke="#10b981" stroke-opacity="0.3" stroke-width="1"/>
+  <path d="M454 443 L459 445 V449 C459 452 456.8 454.5 454 455.5 C451.2 454.5 449 452 449 449 V445 Z" fill="none" stroke="#34d399" stroke-width="1.4"/>
+  <text x="467" y="452" fill="#6ee7b7" font-size="11" font-weight="500">Serveradresse hentes sikkert fra .env • AES-256-GCM HttpOnly session</text>
+
+  <!-- Submit Button -->
+  <rect x="438" y="482" width="404" height="44" rx="12" fill="#2563eb"/>
+  <text x="640" y="509" fill="#ffffff" font-size="13.5" font-weight="700" text-anchor="middle">Log ind</text>
+
+  <!-- Subtle Footer Note -->
+  <text x="640" y="553" fill="#475569" font-size="10.5" text-anchor="middle">DAV-Sync Cal • Mailcow &amp; SOGo CalDAV Webkalender</text>
+</svg>

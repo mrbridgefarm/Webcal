@@ -2,7 +2,11 @@
 
 **En lynhurtig, tastatur-venlig webkalender bygget til personlig planlægning, vagtplanlægning og time-blocking — med direkte Mailcow / SOGo CalDAV-integration, offline PWA-understøttelse og enterprise-grade sikkerhed.**
 
-![DAV-Sync Cal Forside & Brugerflade](docs/preview.svg)
+### Kalenderoversigt (5 visninger, ugenumre, bundplaceret udklipsholder & kompakte farvekasser)
+![DAV-Sync Cal Kalenderoversigt](docs/preview.svg)
+
+### Login-skærm (Skjult standardserver fra `.env` & valgfri servervælger)
+![DAV-Sync Cal Login-skærm](docs/preview-login.svg)
 
 ---
 
