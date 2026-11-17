@@ -81,7 +81,7 @@ DAV-Sync Cal understøtter alle standard **CalDAV-servere** (RFC 4791) — herun
   * Skjul eller gendan kalendere fra oversigten, eller slet egne kalendere permanent.
 * **Farvestyring:** Automatisk tovejs-synkronisering af serverens kalenderfarver (`calendar-color`, bl.a. fra SOGo/Nextcloud) med mulighed for lokal tilpasning.
 * **RSVP & Møder:** Se status for deltagere og besvar invitationer (**Deltager**, **Måske**, **Afvis**) direkte i appen.
-* **Tidszoner & Notifikationer:** Fuld understøttelse af `VTIMEZONE` og browsernotifikationer via `VALARM`.
+* **Tidszoner & Notifikationer:** Fuld understøttelse af `VTIMEZONE` og valgfri browsernotifikationer via `VALARM` (ingen påmindelse som standard ved nye begivenheder).
 
 ---
 
