@@ -1,5 +1,12 @@
 export type RsvpStatus = 'NEEDS-ACTION' | 'ACCEPTED' | 'DECLINED' | 'TENTATIVE';
 
+export type CalendarViewType =
+  | 'multiMonthYear'
+  | 'dayGridMonth'
+  | 'timeGridWeek'
+  | 'timeGridDay'
+  | 'listMonth';
+
 export interface Attendee {
   email: string;
   name?: string;

@@ -21,7 +21,7 @@ import {
   ShieldCheck
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../stores/calendarStore';
-import type { CalendarEvent } from '../types/calendar';
+import type { CalendarEvent, CalendarViewType } from '../types/calendar';
 
 const props = defineProps<{
   titleText: string;
@@ -32,7 +32,7 @@ const emit = defineEmits<{
   (e: 'prev'): void;
   (e: 'next'): void;
   (e: 'today'): void;
-  (e: 'change-view', view: 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay'): void;
+  (e: 'change-view', view: CalendarViewType): void;
   (e: 'jump-to-date', dateIso: string): void;
   (e: 'toggle-sidebar'): void;
 }>();
@@ -224,8 +224,16 @@ function formatShortDateTime(ev: CalendarEvent): string {
         </span>
       </button>
 
-      <!-- Visningsskift: Måned / Uge / Dag -->
+      <!-- Visningsskift: År / Måned / Uge / Dag / Liste -->
       <div class="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-xs">
+        <button
+          type="button"
+          class="px-2.5 py-1 rounded-md font-medium transition"
+          :class="store.currentView === 'multiMonthYear' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'"
+          @click="emit('change-view', 'multiMonthYear')"
+        >
+          År
+        </button>
         <button
           type="button"
           class="px-2.5 py-1 rounded-md font-medium transition"
@@ -249,6 +257,14 @@ function formatShortDateTime(ev: CalendarEvent): string {
           @click="emit('change-view', 'timeGridDay')"
         >
           Dag
+        </button>
+        <button
+          type="button"
+          class="px-2.5 py-1 rounded-md font-medium transition"
+          :class="store.currentView === 'listMonth' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'"
+          @click="emit('change-view', 'listMonth')"
+        >
+          Liste
         </button>
       </div>
 

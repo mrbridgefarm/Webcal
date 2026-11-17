@@ -26,7 +26,8 @@ import type {
   ClipboardState,
   ContextMenuState,
   RsvpStatus,
-  PublicShareLink
+  PublicShareLink,
+  CalendarViewType
 } from '../types/calendar';
 
 const SESSION_STORAGE_KEY = 'dav_sync_cal_session_v2';
@@ -96,7 +97,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   const lastSyncedAt = ref<string | null>(null);
 
   // Visning & Selektion
-  const currentView = ref<'dayGridMonth' | 'timeGridWeek' | 'timeGridDay'>('dayGridMonth');
+  const currentView = ref<CalendarViewType>('dayGridMonth');
   const selectedEventIds = ref<string[]>([]);
   const selectedDateStr = ref<string>(toDateOnlyString(new Date()));
   const activeTargetCalendarId = ref<string>('');

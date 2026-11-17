@@ -3,6 +3,8 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import FullCalendar from '@fullcalendar/vue3';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
+import multiMonthPlugin from '@fullcalendar/multimonth';
+import listPlugin from '@fullcalendar/list';
 import interactionPlugin from '@fullcalendar/interaction';
 import type {
   CalendarOptions,
@@ -12,7 +14,7 @@ import type {
 import type { DateClickArg, EventResizeDoneArg } from '@fullcalendar/interaction';
 import { Lock, Users, Video, Check, Copy, Scissors } from 'lucide-vue-next';
 import { useCalendarStore, toDateOnlyString } from '../stores/calendarStore';
-import type { CalendarEvent } from '../types/calendar';
+import type { CalendarEvent, CalendarViewType } from '../types/calendar';
 
 const emit = defineEmits<{
   (e: 'title-change', title: string): void;
@@ -248,17 +250,19 @@ async function handleEventResize(arg: EventResizeDoneArg) {
 }
 
 const calendarOptions = computed<CalendarOptions>(() => ({
-  plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin],
+  plugins: [dayGridPlugin, timeGridPlugin, multiMonthPlugin, listPlugin, interactionPlugin],
   initialView: store.currentView,
   locale: 'da',
   firstDay: 1,
+  weekNumbers: true,
+  weekText: 'Uge ',
   headerToolbar: false,
   height: '100%',
   expandRows: false,
   fixedWeekCount: false,
-  // Kravspecifikation: Plads til op til 7 synlige begivenheder pr. dag, derefter "+ X flere"
   dayMaxEvents: 7,
-  // Tvinger ALLE aftaler (både tidsbestemte og heldags) til at vises med en tydelig farvet kasse rundt om
+  multiMonthMaxColumns: 3,
+  noEventsText: 'Ingen begivenheder i denne periode',
   eventDisplay: 'block',
   moreLinkText: (num: number) => `+ ${num} flere`,
   navLinks: false,
@@ -317,7 +321,7 @@ function goToday() {
   }
 }
 
-function changeView(viewName: 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay') {
+function changeView(viewName: CalendarViewType) {
   store.currentView = viewName;
   const api = calendarRef.value?.getApi();
   if (api) {
