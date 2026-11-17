@@ -29,7 +29,7 @@ const endTime = ref('10:00');
 const location = ref('');
 const videoUrl = ref('');
 const description = ref('');
-const reminderMinutes = ref<number | null>(15);
+const reminderMinutes = ref<number | null>(null);
 const attendees = ref<Attendee[]>([]);
 const newAttendeeEmail = ref('');
 
@@ -71,7 +71,7 @@ watch(
     location.value = ev.location || '';
     videoUrl.value = ev.videoUrl || '';
     description.value = ev.description || '';
-    reminderMinutes.value = ev.reminderMinutes !== undefined ? ev.reminderMinutes : 15;
+    reminderMinutes.value = ev.reminderMinutes !== undefined ? ev.reminderMinutes : null;
     attendees.value = ev.attendees ? [...ev.attendees] : [];
     newAttendeeEmail.value = '';
   },

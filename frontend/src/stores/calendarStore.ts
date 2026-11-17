@@ -834,7 +834,7 @@ export const useCalendarStore = defineStore('calendar', () => {
       reminderMinutes:
         eventInput.reminderMinutes !== undefined
           ? eventInput.reminderMinutes
-          : (existing?.reminderMinutes ?? 15),
+          : (existing?.reminderMinutes ?? null),
       etag: eventInput.etag !== undefined ? eventInput.etag : existing?.etag,
       caldavUrl: eventInput.caldavUrl !== undefined ? eventInput.caldavUrl : existing?.caldavUrl,
       rawIcs: eventInput.rawIcs !== undefined ? eventInput.rawIcs : existing?.rawIcs,
@@ -1402,7 +1402,7 @@ export const useCalendarStore = defineStore('calendar', () => {
       videoUrl: '',
       timezone: 'Europe/Copenhagen',
       attendees: [],
-      reminderMinutes: 15
+      reminderMinutes: null
     };
     isEventModalOpen.value = true;
   }
