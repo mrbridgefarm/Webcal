@@ -3,7 +3,6 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import FullCalendar from '@fullcalendar/vue3';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
-import multiMonthPlugin from '@fullcalendar/multimonth';
 import listPlugin from '@fullcalendar/list';
 import interactionPlugin from '@fullcalendar/interaction';
 import type {
@@ -16,6 +15,7 @@ import type { DateClickArg, EventResizeDoneArg } from '@fullcalendar/interaction
 import { Check, Copy, Scissors } from 'lucide-vue-next';
 import { useCalendarStore, toDateOnlyString } from '../stores/calendarStore';
 import type { CalendarEvent, CalendarViewType } from '../types/calendar';
+import YearView from './YearView.vue';
 
 const emit = defineEmits<{
   (e: 'title-change', title: string): void;
@@ -27,7 +27,8 @@ const gridContainerRef = ref<HTMLElement | null>(null);
 let lastClickTime = 0;
 let lastClickedId = '';
 
-const initialView = store.currentView;
+const initialView = store.currentView === 'multiMonthYear' ? 'dayGridMonth' : store.currentView;
+const yearViewYear = ref<number>(new Date().getFullYear());
 
 function createSvgIcon(paths: string[]): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -344,7 +345,7 @@ async function handleEventResize(arg: EventResizeDoneArg) {
 }
 
 const calendarOptions = computed<CalendarOptions>(() => ({
-  plugins: [dayGridPlugin, timeGridPlugin, multiMonthPlugin, listPlugin, interactionPlugin],
+  plugins: [dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin],
   initialView,
   locale: 'da',
   firstDay: 1,
@@ -355,13 +356,6 @@ const calendarOptions = computed<CalendarOptions>(() => ({
   expandRows: false,
   fixedWeekCount: false,
   dayMaxEvents: 7,
-  multiMonthMaxColumns: 3,
-  views: {
-    multiMonthYear: {
-      dayMaxEvents: 2,
-      multiMonthMaxColumns: 3
-    }
-  },
   noEventsText: 'Ingen begivenheder i denne periode',
   eventDisplay: 'block',
   eventContent: renderEventContent,
@@ -395,6 +389,11 @@ const calendarOptions = computed<CalendarOptions>(() => ({
 }));
 
 function goPrev() {
+  if (store.currentView === 'multiMonthYear') {
+    yearViewYear.value -= 1;
+    emit('title-change', String(yearViewYear.value));
+    return;
+  }
   const api = calendarRef.value?.getApi();
   if (api) {
     api.prev();
@@ -404,6 +403,11 @@ function goPrev() {
 }
 
 function goNext() {
+  if (store.currentView === 'multiMonthYear') {
+    yearViewYear.value += 1;
+    emit('title-change', String(yearViewYear.value));
+    return;
+  }
   const api = calendarRef.value?.getApi();
   if (api) {
     api.next();
@@ -413,31 +417,88 @@ function goNext() {
 }
 
 function goToday() {
+  const now = new Date();
+  store.selectedDateStr = toDateOnlyString(now);
+  if (store.currentView === 'multiMonthYear') {
+    yearViewYear.value = now.getFullYear();
+    emit('title-change', String(yearViewYear.value));
+    return;
+  }
   const api = calendarRef.value?.getApi();
   if (api) {
     api.today();
-    store.selectedDateStr = toDateOnlyString(new Date());
     emit('title-change', api.view.title);
     void nextTick(updateSelectedDayHighlight);
   }
 }
 
 function changeView(viewName: CalendarViewType) {
+  const prevView = store.currentView;
   store.currentView = viewName;
+
+  if (viewName === 'multiMonthYear') {
+    const api = calendarRef.value?.getApi();
+    const currentDate = api?.getDate() || new Date(store.selectedDateStr || Date.now());
+    yearViewYear.value = Number.isNaN(currentDate.getTime()) ? new Date().getFullYear() : currentDate.getFullYear();
+    emit('title-change', String(yearViewYear.value));
+    return;
+  }
+
   const api = calendarRef.value?.getApi();
   if (api) {
-    api.changeView(viewName);
-    emit('title-change', api.view.title);
-    void nextTick(updateSelectedDayHighlight);
+    void nextTick(() => {
+      api.changeView(viewName);
+      if (prevView === 'multiMonthYear') {
+        api.updateSize();
+      }
+      emit('title-change', api.view.title);
+      void nextTick(updateSelectedDayHighlight);
+    });
   }
 }
 
 function jumpToDate(dateIso: string) {
+  if (store.currentView === 'multiMonthYear') {
+    const d = new Date(dateIso);
+    if (!Number.isNaN(d.getTime())) {
+      yearViewYear.value = d.getFullYear();
+      emit('title-change', String(yearViewYear.value));
+    }
+    return;
+  }
   const api = calendarRef.value?.getApi();
   if (api) {
     api.gotoDate(dateIso);
     emit('title-change', api.view.title);
     void nextTick(updateSelectedDayHighlight);
+  }
+}
+
+function handleYearOpenMonth(dateStr: string) {
+  store.selectedDateStr = dateStr;
+  store.currentView = 'dayGridMonth';
+  const api = calendarRef.value?.getApi();
+  if (api) {
+    void nextTick(() => {
+      api.changeView('dayGridMonth', dateStr);
+      api.updateSize();
+      emit('title-change', api.view.title);
+      void nextTick(updateSelectedDayHighlight);
+    });
+  }
+}
+
+function handleYearOpenDay(dateStr: string) {
+  store.selectedDateStr = dateStr;
+  store.currentView = 'timeGridDay';
+  const api = calendarRef.value?.getApi();
+  if (api) {
+    void nextTick(() => {
+      api.changeView('timeGridDay', dateStr);
+      api.updateSize();
+      emit('title-change', api.view.title);
+      void nextTick(updateSelectedDayHighlight);
+    });
   }
 }
 
@@ -517,7 +578,17 @@ defineExpose({
       :class="store.isPublicShareMode ? 'h-full' : 'h-[calc(100%-28px)]'"
       class="rounded-2xl overflow-hidden border border-slate-800 bg-slate-900/50 shadow-inner"
     >
-      <FullCalendar ref="calendarRef" :options="calendarOptions" />
+      <YearView
+        v-if="store.currentView === 'multiMonthYear'"
+        :year="yearViewYear"
+        @open-month="handleYearOpenMonth"
+        @open-day="handleYearOpenDay"
+      />
+      <FullCalendar
+        v-show="store.currentView !== 'multiMonthYear'"
+        ref="calendarRef"
+        :options="calendarOptions"
+      />
     </div>
   </div>
 </template>
