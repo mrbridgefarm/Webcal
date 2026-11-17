@@ -25,12 +25,12 @@ Traditionelle webkalendere kræver ofte utallige museklik og formularer, når ma
 
 ### 📆 2. 5 Fleksible Kalendervisninger & Danske Ugenumre
 * **5 visningstilstande:**
-  * **År (`multiMonthYear`):** Komplet 12-måneders overblik.
+  * **År (`YearView`):** Lynhurtigt, specialbygget 12-måneders overblik med farvede begivenhedsprikker og dagsbjælke i bunden — skifter øjeblikkeligt selv ved 1.500+ begivenheder. Klik på en dag for at se dagens aftaler, dobbeltklik for at åbne dagsvisningen, eller klik på en måned for at åbne månedsvisningen.
   * **Måned (`dayGridMonth`):** Klassisk månedsoverblik med ren datostruktur.
   * **Uge (`timeGridWeek`):** Tidsblokke for mandag-søndag med præcis timeinddeling.
   * **Dag (`timeGridDay`):** Detaljeret dagsvisning time for time.
   * **Liste (`listMonth`):** Kronologisk dagsorden/liste over alle månedens aktiviteter.
-* **Danske ugenumre:** Tydelig visning af ugenumre (`Uge 1`, `Uge 47` osv.) i venstre kolonne på tværs af måned- og ugevisningerne.
+* **Danske ugenumre:** Tydelig visning af ISO-ugenumre (`Uge 1`, `Uge 47` osv.) på tværs af år-, måned- og ugevisningerne.
 
 ### 📐 3. Fleksibel Brugerflade & Kompakte Begivenhedskasser
 * **Justerbart & sammenklappeligt sidepanel:** Træk i panelets højre kant for trinløst at justere bredden mellem 180px og 420px, eller skjul panelet helt med knappen i topbaren for maksimal kalenderplads.
@@ -52,8 +52,8 @@ Traditionelle webkalendere kræver ofte utallige museklik og formularer, når ma
 * **Spam-beskyttelse ved møder:** Hvis en begivenhed indeholder inviterede gæster (`ATTENDEE`), spærres `Ctrl+C` automatisk, så du ikke ved en fejl kommer til at duplikere mødeinvitationer til eksterne deltagere.
 * **Intelligent Read-Only lås:** Delte kalendere uden skriverettigheder markeres med `🔒 Read-Only` og beskyttes automatisk mod utilsigtede ændringer, sletning og `Ctrl+V`.
 
-### ↶ 8. Lokal Fortryd (`Ctrl+Z`) & 30-dages Papirkurv
-* **Fortryd i flere niveauer:** Handlinger lægges i en lokal historik og kan fortrydes med `Ctrl+Z` eller via knappen i topbaren.
+### ↶ 8. Lokal Fortryd (`Ctrl+Z` i 30 sek.) & 30-dages Papirkurv
+* **Fortryd med automatisk udløb:** Handlinger kan fortrydes med `Ctrl+Z` eller via knappen i topbaren i op til **30 sekunder** efter handlingen, hvorefter historikken automatisk ryddes for at spare hukommelse.
 * **30-dages lokal papirkurv:** Slettede aftaler gemmes lokalt i 30 dage med dagsnedtælling og kan gendannes med ét klik.
 
 ### 🔗 9. Del Kalender med 3. Part (Offentligt Link uden login)
@@ -147,6 +147,6 @@ I **Pangolin** kan du pege direkte på **`http://dav-sync-cal:3000`** (eller til
 
 ## 🛠️ Teknologisk Stack
 
-* **Frontend:** Vue 3 (Composition API) + TypeScript + Vite + Tailwind CSS + FullCalendar (`dayGrid`, `timeGrid`, `multiMonth`, `list`, `interaction`) + Pinia + Dexie.js (IndexedDB) + VitePWA Service Worker.
+* **Frontend:** Vue 3 (Composition API) + TypeScript + Vite + Tailwind CSS + FullCalendar (`dayGrid`, `timeGrid`, `list`, `interaction`) + specialbygget letvægts `YearView` + Pinia + Dexie.js (IndexedDB) + VitePWA Service Worker.
 * **Backend Proxy:** Node.js + Express + TypeScript + `tsdav` + `ical.js` + direkte WebDAV/CalDAV XML-engine (`PROPFIND`, `REPORT`, `PUT`, `DELETE`, `MKCALENDAR`).
 * **Sikkerhed:** `crypto` (AES-256-GCM), `cookie-parser`, `helmet`, `express-rate-limit`, `cors`.
