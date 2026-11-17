@@ -9,10 +9,11 @@ import interactionPlugin from '@fullcalendar/interaction';
 import type {
   CalendarOptions,
   EventClickArg,
+  EventContentArg,
   EventDropArg
 } from '@fullcalendar/core';
 import type { DateClickArg, EventResizeDoneArg } from '@fullcalendar/interaction';
-import { Lock, Users, Video, Check, Copy, Scissors } from 'lucide-vue-next';
+import { Check, Copy, Scissors } from 'lucide-vue-next';
 import { useCalendarStore, toDateOnlyString } from '../stores/calendarStore';
 import type { CalendarEvent, CalendarViewType } from '../types/calendar';
 
@@ -26,14 +27,102 @@ const gridContainerRef = ref<HTMLElement | null>(null);
 let lastClickTime = 0;
 let lastClickedId = '';
 
-const fcEvents = computed(() =>
-  store.visibleEvents.map((ev) => {
-    const cal = store.getCalendarById(ev.calendarId);
+const initialView = store.currentView;
+
+function createSvgIcon(paths: string[]): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '12');
+  svg.setAttribute('height', '12');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.classList.add('w-3', 'h-3');
+  for (const d of paths) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+const ICON_VIDEO_TPL = createSvgIcon(['m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5', 'M2 6h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z']);
+const ICON_USERS_TPL = createSvgIcon(['M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2', 'M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z', 'M22 21v-2a4 4 0 0 0-3-3.87', 'M16 3.13a4 4 0 0 1 0 7.75']);
+const ICON_LOCK_TPL = createSvgIcon(['M7 11V7a5 5 0 0 1 10 0v4', 'M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z']);
+
+function renderEventContent(arg: EventContentArg) {
+  const props = arg.event.extendedProps;
+  const calColor = (props.calColor as string) || '#06b6d4';
+  const isInClipboard = Boolean(props.isInClipboard);
+  const clipboardMode = props.clipboardMode as string | null;
+  const hasGuests = Boolean(props.hasGuests);
+  const hasVideo = Boolean(props.hasVideo);
+  const isReadOnly = Boolean(props.isReadOnly);
+  const calendarName = (props.calendarName as string) || '';
+
+  const root = document.createElement('div');
+  root.setAttribute('data-dav-event-id', arg.event.id);
+  root.className =
+    'w-full px-1.5 py-[1px] flex items-center justify-between gap-1 overflow-hidden text-[10.5px] leading-[14px] cursor-pointer select-none rounded-[4px]';
+  root.style.backgroundColor = calColor;
+  root.style.borderLeft = '3px solid rgba(255, 255, 255, 0.5)';
+  root.style.boxShadow = 'inset 0 0 0 1px rgba(255, 255, 255, 0.18)';
+  root.title = `${arg.event.title} — Kalender: ${calendarName}${isInClipboard ? ' (I UDKLIPSHOLDER)' : ''}${hasGuests ? ' (Har mødedeltagere - Ctrl+C spærret)' : ''}`;
+
+  const left = document.createElement('div');
+  left.className = 'flex items-center gap-1 min-w-0 truncate text-white';
+  left.style.textShadow = '0 1px 1px rgba(0, 0, 0, 0.45)';
+
+  if (isInClipboard) {
+    const badge = document.createElement('span');
+    badge.className = 'px-1 py-0.2 rounded bg-black/50 text-emerald-300 text-[9px] font-bold uppercase shrink-0';
+    badge.textContent = clipboardMode === 'CUT' ? 'KLIP' : 'KOPI';
+    left.appendChild(badge);
+  }
+
+  if (arg.timeText) {
+    const timeEl = document.createElement('span');
+    timeEl.className = 'font-bold opacity-95 shrink-0';
+    timeEl.textContent = arg.timeText;
+    left.appendChild(timeEl);
+  }
+
+  const titleEl = document.createElement('span');
+  titleEl.className = 'font-semibold truncate';
+  titleEl.textContent = arg.event.title;
+  left.appendChild(titleEl);
+
+  root.appendChild(left);
+
+  const showLock = isReadOnly && !store.isPublicShareMode;
+  if (hasVideo || hasGuests || showLock) {
+    const right = document.createElement('div');
+    right.className = 'flex items-center gap-0.5 shrink-0 text-white/90';
+    if (hasVideo) right.appendChild(ICON_VIDEO_TPL.cloneNode(true));
+    if (hasGuests) right.appendChild(ICON_USERS_TPL.cloneNode(true));
+    if (showLock) right.appendChild(ICON_LOCK_TPL.cloneNode(true));
+    root.appendChild(right);
+  }
+
+  return { domNodes: [root] };
+}
+
+const fcEvents = computed(() => {
+  const calendarMap = new Map(store.calendars.map((c) => [c.id, c]));
+  const selectedSet = new Set(store.selectedEventIds);
+  const clipSet = store.clipboardEventIds;
+  const clipMode = store.clipboard.mode;
+  const isShare = store.isPublicShareMode;
+
+  return store.visibleEvents.map((ev) => {
+    const cal = calendarMap.get(ev.calendarId);
     const calColor = cal?.color || '#06b6d4';
-    const isSelected = store.selectedEventIds.includes(ev.id);
-    const isInClipboard = store.clipboardEventIds.has(ev.id);
-    const clipboardMode = isInClipboard ? store.clipboard.mode : null;
-    const isReadOnly = store.isPublicShareMode || Boolean(cal?.readOnly);
+    const isSelected = selectedSet.has(ev.id);
+    const isInClipboard = clipSet.has(ev.id);
+    const clipboardMode = isInClipboard ? clipMode : null;
+    const isReadOnly = isShare || Boolean(cal?.readOnly);
     const hasGuests = store.hasInvitedAttendees(ev);
 
     return {
@@ -69,24 +158,29 @@ const fcEvents = computed(() =>
         clipboardMode,
         isReadOnly,
         hasGuests,
+        hasVideo: Boolean(ev.videoUrl),
         calendarName: cal?.name || ''
       }
     };
-  })
-);
+  });
+});
 
 function updateSelectedDayHighlight() {
   if (!gridContainerRef.value) return;
+  gridContainerRef.value
+    .querySelectorAll<HTMLElement>('.dav-day-selected')
+    .forEach((el) => el.classList.remove('dav-day-selected'));
+
   const targetYmd = (store.selectedDateStr || '').slice(0, 10);
-  const dayEls = gridContainerRef.value.querySelectorAll<HTMLElement>('.fc-daygrid-day, .fc-timegrid-col');
-  dayEls.forEach((el) => {
-    const d = el.getAttribute('data-date');
-    if (d && d === targetYmd) {
-      el.classList.add('dav-day-selected');
-    } else {
-      el.classList.remove('dav-day-selected');
-    }
-  });
+  if (!targetYmd) return;
+
+  gridContainerRef.value
+    .querySelectorAll<HTMLElement>(`[data-date="${CSS.escape(targetYmd)}"]`)
+    .forEach((el) => {
+      if (el.classList.contains('fc-daygrid-day') || el.classList.contains('fc-timegrid-col')) {
+        el.classList.add('dav-day-selected');
+      }
+    });
 }
 
 watch(
@@ -251,7 +345,7 @@ async function handleEventResize(arg: EventResizeDoneArg) {
 
 const calendarOptions = computed<CalendarOptions>(() => ({
   plugins: [dayGridPlugin, timeGridPlugin, multiMonthPlugin, listPlugin, interactionPlugin],
-  initialView: store.currentView,
+  initialView,
   locale: 'da',
   firstDay: 1,
   weekNumbers: true,
@@ -262,8 +356,15 @@ const calendarOptions = computed<CalendarOptions>(() => ({
   fixedWeekCount: false,
   dayMaxEvents: 7,
   multiMonthMaxColumns: 3,
+  views: {
+    multiMonthYear: {
+      dayMaxEvents: 2,
+      multiMonthMaxColumns: 3
+    }
+  },
   noEventsText: 'Ingen begivenheder i denne periode',
   eventDisplay: 'block',
+  eventContent: renderEventContent,
   moreLinkText: (num: number) => `+ ${num} flere`,
   navLinks: false,
   editable: !store.isPublicShareMode,
@@ -416,48 +517,7 @@ defineExpose({
       :class="store.isPublicShareMode ? 'h-full' : 'h-[calc(100%-28px)]'"
       class="rounded-2xl overflow-hidden border border-slate-800 bg-slate-900/50 shadow-inner"
     >
-      <FullCalendar ref="calendarRef" :options="calendarOptions">
-        <template #eventContent="arg">
-          <div
-            :data-dav-event-id="arg.event.id"
-            class="w-full px-1.5 py-[1px] flex items-center justify-between gap-1 overflow-hidden text-[10.5px] leading-[14px] cursor-pointer select-none rounded-[4px]"
-            :style="{
-              backgroundColor: arg.event.extendedProps.calColor || '#06b6d4',
-              borderLeft: '3px solid rgba(255, 255, 255, 0.5)',
-              boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.18)'
-            }"
-            :title="`${arg.event.title} — Kalender: ${arg.event.extendedProps.calendarName}${arg.event.extendedProps.isInClipboard ? ' (I UDKLIPSHOLDER)' : ''}${arg.event.extendedProps.hasGuests ? ' (Har mødedeltagere - Ctrl+C spærret)' : ''}`"
-          >
-            <div class="flex items-center gap-1 min-w-0 truncate text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.45)]">
-              <span
-                v-if="arg.event.extendedProps.isInClipboard"
-                class="px-1 py-0.2 rounded bg-black/50 text-emerald-300 text-[9px] font-bold uppercase shrink-0"
-              >
-                {{ arg.event.extendedProps.clipboardMode === 'CUT' ? 'KLIP' : 'KOPI' }}
-              </span>
-              <span v-if="arg.timeText" class="font-bold opacity-95 shrink-0">
-                {{ arg.timeText }}
-              </span>
-              <span class="font-semibold truncate">{{ arg.event.title }}</span>
-            </div>
-
-            <div class="flex items-center gap-0.5 shrink-0 text-white/90">
-              <Video
-                v-if="arg.event.extendedProps.rawEvent?.videoUrl"
-                class="w-3 h-3"
-              />
-              <Users
-                v-if="arg.event.extendedProps.hasGuests"
-                class="w-3 h-3"
-              />
-              <Lock
-                v-if="arg.event.extendedProps.isReadOnly && !store.isPublicShareMode"
-                class="w-3 h-3"
-              />
-            </div>
-          </div>
-        </template>
-      </FullCalendar>
+      <FullCalendar ref="calendarRef" :options="calendarOptions" />
     </div>
   </div>
 </template>
