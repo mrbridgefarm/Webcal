@@ -98,18 +98,71 @@ export function extractDirectCalendarUrl(rawUrl: string): string | null {
 }
 
 /**
+ * SSRF-beskyttelse: Validerer at en CalDAV-server URL bruger http/https og ikke peger
+ * på lokale loopback/metadata/link-local adresser (medmindre det er serverens egen DEFAULT_CALDAV_URL).
+ */
+export function assertSafeCalDavUrl(rawUrl: string): URL {
+  const withProtocol = /^https?:\/\//i.test(rawUrl.trim()) ? rawUrl.trim() : `https://${rawUrl.trim()}`;
+  const urlObj = new URL(withProtocol);
+
+  if (urlObj.protocol !== 'https:' && urlObj.protocol !== 'http:') {
+    throw new Error('Kun HTTP/HTTPS-protokoller er tilladt.');
+  }
+
+  // Hvis URL'en matcher den administrator-konfigurerede DEFAULT_CALDAV_URL, er den altid tilladt
+  const defaultEnvUrl = process.env.DEFAULT_CALDAV_URL?.trim();
+  if (defaultEnvUrl) {
+    try {
+      const defObj = new URL(/^https?:\/\//i.test(defaultEnvUrl) ? defaultEnvUrl : `https://${defaultEnvUrl}`);
+      if (urlObj.origin.toLowerCase() === defObj.origin.toLowerCase()) {
+        return urlObj;
+      }
+    } catch {
+      // ignorer ugyldig env-url
+    }
+  }
+
+  const host = urlObj.hostname.toLowerCase();
+  const isBlockedHost =
+    host === 'localhost' ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host === '[::1]' ||
+    host.startsWith('127.') ||
+    host.startsWith('169.254.') ||
+    host.endsWith('.internal') ||
+    host.endsWith('.local');
+
+  if (isBlockedHost) {
+    throw new Error('Adgang til lokale eller interne adresser er blokeret af sikkerhedspolitikken.');
+  }
+
+  return urlObj;
+}
+
+/**
+ * Sikrer at mål-URL'en (ved PUT/DELETE/PROPFIND) tilhører den samme origin som den autentificerede CalDAV-server.
+ */
+function assertSameServerOrigin(targetUrl: string, creds: CalDavCredentials) {
+  const serverOrigin = new URL(normalizeMailcowUrl(creds.serverUrl)).origin.toLowerCase();
+  const targetOrigin = new URL(targetUrl).origin.toLowerCase();
+  if (serverOrigin !== targetOrigin) {
+    throw new Error('Sikkerhedsfejl: Mål-URL matcher ikke den autentificerede CalDAV-server.');
+  }
+}
+
+/**
  * Normaliserer Mailcow/SOGo URL:
- * Understøtter både domæne-rod (https://post2ko.bridgefarm.dk),
- * DAV-rod (https://post2ko.bridgefarm.dk/SOGo/dav/)
- * OG direkte kalender-links (https://post2ko.bridgefarm.dk/SOGo/dav/mail@bridgefarm.dk/Calendar/personal/)!
+ * Understøtter både domæne-rod (https://mail.domæne.dk),
+ * DAV-rod (https://mail.domæne.dk/SOGo/dav/)
+ * OG direkte kalender-links!
  */
 export function normalizeMailcowUrl(rawUrl: string): string {
   const trimmed = rawUrl.trim().replace(/\/+$/, '');
   if (!trimmed) {
     throw new Error('Server URL mangler');
   }
-  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  const urlObj = new URL(withProtocol);
+  const urlObj = assertSafeCalDavUrl(trimmed);
 
   // Hvis URL'en peger dybt ind i /SOGo/dav/..., normaliseres rod-URL'en til /SOGo/dav/
   const sogoMatch = urlObj.pathname.match(/^(.*\/SOGo\/dav)(?:\/.*)?$/i);
@@ -159,6 +212,7 @@ async function davRequest(
   body?: string,
   extraHeaders: Record<string, string> = {}
 ): Promise<Response> {
+  assertSameServerOrigin(url, creds);
   const auth = Buffer.from(`${creds.username}:${creds.password}`, 'utf8').toString('base64');
   const res = await fetch(url, {
     method,

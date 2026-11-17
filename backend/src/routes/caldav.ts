@@ -1,4 +1,5 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
+import crypto from 'node:crypto';
 import {
   CalDavCredentials,
   fetchCalendars,
@@ -11,7 +12,7 @@ import {
   deleteCalDavCalendar
 } from '../services/davClient.js';
 import {
-   CalendarEventDTO,
+  CalendarEventDTO,
   AttendeeDTO,
   parseIcsToEvents,
   buildCalendarExportIcs,
@@ -21,10 +22,122 @@ import {
   listSharesForUser,
   createShareLink,
   deleteShareLink,
-  resolveShareToken
+  resolveShareToken,
+  encryptJson,
+  decryptJson
 } from '../services/shareStore.js';
 
 export const caldavRouter = Router();
+
+const SESSION_COOKIE_NAME = 'dav_sync_session';
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 dage
+
+interface EncryptedCookieSession {
+  serverUrl: string;
+  username: string;
+  password: string;
+  exp: number;
+}
+
+// Simpel in-memory rate limiter mod brute-force på login og offentlige delingslinks
+function createRateLimiter(maxHits: number, windowMs: number, errorMessage: string) {
+  const hits = new Map<string, { count: number; resetAt: number }>();
+
+  return (req: Request, res: Response, next: NextFunction) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const record = hits.get(ip);
+
+    if (!record || record.resetAt <= now) {
+      hits.set(ip, { count: 1, resetAt: now + windowMs });
+      next();
+      return;
+    }
+
+    record.count += 1;
+    if (record.count > maxHits) {
+      res.status(429).json({ ok: false, error: errorMessage });
+      return;
+    }
+
+    // Periodisk oprydning hvis mappet vokser
+    if (hits.size > 5000) {
+      for (const [k, v] of hits.entries()) {
+        if (v.resetAt <= now) hits.delete(k);
+      }
+    }
+    next();
+  };
+}
+
+const loginLimiter = createRateLimiter(
+  15,
+  15 * 60 * 1000,
+  'For mange loginforsøg. Vent venligst et par minutter og prøv igen.'
+);
+const publicShareLimiter = createRateLimiter(
+  60,
+  60 * 1000,
+  'For mange forespørgsler. Prøv igen om et øjeblik.'
+);
+
+function parseCookieHeader(cookieHeader?: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!cookieHeader) return result;
+  for (const part of cookieHeader.split(';')) {
+    const eqIdx = part.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = part.slice(0, eqIdx).trim();
+    const val = part.slice(eqIdx + 1).trim();
+    if (key) {
+      result[key] = decodeURIComponent(val);
+    }
+  }
+  return result;
+}
+
+function getSessionFromCookie(req: Request): EncryptedCookieSession | null {
+  const cookies = parseCookieHeader(req.headers.cookie);
+  const rawToken = cookies[SESSION_COOKIE_NAME];
+  if (!rawToken) return null;
+  const parsed = decryptJson<EncryptedCookieSession>(rawToken);
+  if (!parsed || !parsed.username || !parsed.password || !parsed.serverUrl) {
+    return null;
+  }
+  if (typeof parsed.exp === 'number' && parsed.exp < Date.now()) {
+    return null;
+  }
+  return parsed;
+}
+
+function setSessionCookie(req: Request, res: Response, creds: CalDavCredentials) {
+  const payload: EncryptedCookieSession = {
+    serverUrl: creds.serverUrl,
+    username: creds.username,
+    password: creds.password,
+    exp: Date.now() + SESSION_TTL_MS
+  };
+  const encrypted = encryptJson(payload);
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+
+  res.cookie(SESSION_COOKIE_NAME, encrypted, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: isHttps,
+    maxAge: SESSION_TTL_MS,
+    path: '/api/caldav'
+  });
+}
+
+function clearSessionCookie(req: Request, res: Response) {
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.clearCookie(SESSION_COOKIE_NAME, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: isHttps,
+    path: '/api/caldav'
+  });
+}
 
 function safeDecodeHeader(val?: string): string {
   if (!val) return '';
@@ -36,6 +149,17 @@ function safeDecodeHeader(val?: string): string {
 }
 
 function extractCredentials(req: Request): CalDavCredentials {
+  // 1. Foretræk den AES-256-GCM krypterede HttpOnly session-cookie
+  const cookieSession = getSessionFromCookie(req);
+  if (cookieSession) {
+    return {
+      serverUrl: cookieSession.serverUrl,
+      username: cookieSession.username,
+      password: cookieSession.password
+    };
+  }
+
+  // 2. Fallback til direkte login-kald eller API-headers
   const headerServer = safeDecodeHeader(req.headers['x-caldav-server'] as string | undefined);
   const headerUser = safeDecodeHeader(req.headers['x-caldav-user'] as string | undefined);
   const headerPass = safeDecodeHeader(req.headers['x-caldav-password'] as string | undefined);
@@ -49,7 +173,7 @@ function extractCredentials(req: Request): CalDavCredentials {
   const password = req.body?.password || headerPass || '';
 
   if (!serverUrl || !username || !password) {
-    throw new Error('Manglende CalDAV login-oplysninger (Server URL, E-mail eller Adgangskode).');
+    throw new Error('Ikke logget ind. Log venligst ind igen.');
   }
 
   return { serverUrl, username, password };
@@ -67,20 +191,45 @@ caldavRouter.get('/config', (_req: Request, res: Response) => {
 });
 
 /**
- * POST /api/caldav/login
- * Validerer brugerens login direkte mod Mailcow/SOGo og returnerer kalenderlisten.
+ * GET /api/caldav/session
+ * Returnerer aktiv krypteret session (kun brugernavn, ALDRIG adgangskode eller server-URL fra .env).
  */
-caldavRouter.post('/login', async (req: Request, res: Response) => {
+caldavRouter.get('/session', (req: Request, res: Response) => {
+  const cookieSession = getSessionFromCookie(req);
+  if (!cookieSession) {
+    res.json({ ok: true, authenticated: false });
+    return;
+  }
+  res.json({
+    ok: true,
+    authenticated: true,
+    username: cookieSession.username
+  });
+});
+
+/**
+ * POST /api/caldav/login
+ * Validerer brugerens login mod Mailcow/SOGo og sætter en AES-256-GCM krypteret HttpOnly cookie.
+ */
+caldavRouter.post('/login', loginLimiter, async (req: Request, res: Response) => {
   try {
-    const customServerProvided = Boolean(req.body?.serverUrl && String(req.body.serverUrl).trim());
-    const creds = extractCredentials(req);
-    const normalizedUrl = normalizeMailcowUrl(creds.serverUrl);
+    const serverUrl = String(req.body?.serverUrl || process.env.DEFAULT_CALDAV_URL || '').trim();
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '');
+
+    if (!serverUrl || !username || !password) {
+      res.status(400).json({ ok: false, error: 'Manglende login-oplysninger.' });
+      return;
+    }
+
+    const normalizedUrl = normalizeMailcowUrl(serverUrl);
+    const creds: CalDavCredentials = { serverUrl: normalizedUrl, username, password };
     const calendars = await fetchCalendars(creds);
+
+    setSessionCookie(req, res, creds);
 
     res.json({
       ok: true,
-      // Hvis brugeren logger ind via .env standardserveren, sendes URL'en ikke tilbage til klienten
-      serverUrl: customServerProvided ? normalizedUrl : '',
       username: creds.username,
       calendars
     });
@@ -91,6 +240,15 @@ caldavRouter.post('/login', async (req: Request, res: Response) => {
       error: err?.message || 'Kunne ikke logge ind på Mailcow/SOGo CalDAV-serveren.'
     });
   }
+});
+
+/**
+ * POST /api/caldav/logout
+ * Sletter den krypterede HttpOnly session-cookie.
+ */
+caldavRouter.post('/logout', (req: Request, res: Response) => {
+  clearSessionCookie(req, res);
+  res.json({ ok: true });
 });
 
 /**
@@ -268,7 +426,6 @@ caldavRouter.post('/import', async (req: Request, res: Response) => {
 
     const savedEvents: CalendarEventDTO[] = [];
     for (const ev of parsedEvents) {
-      // Generér ny UID så importerede begivenheder altid oprettes rent i mål-kalenderen
       const saved = await saveCalDavEvent(creds, {
         ...ev,
         calendarId,
@@ -296,10 +453,11 @@ caldavRouter.post('/import', async (req: Request, res: Response) => {
 
 /**
  * POST /api/caldav/export
- * Genererer en samlet .ics-fil ud fra de valgte begivenheder.
+ * Genererer en samlet .ics-fil ud fra de valgte begivenheder (kræver aktiv session).
  */
 caldavRouter.post('/export', async (req: Request, res: Response) => {
   try {
+    extractCredentials(req);
     const events = Array.isArray(req.body?.events) ? (req.body.events as CalendarEventDTO[]) : [];
     const calendarName = String(req.body?.calendarName || 'Kalender').trim();
     const icsContent = buildCalendarExportIcs(events, calendarName);
@@ -319,12 +477,16 @@ caldavRouter.post('/export', async (req: Request, res: Response) => {
 
 /**
  * GET /api/caldav/shares
- * Henter alle aktive offentlige delingslinks for den indloggede bruger.
+ * Henter alle aktive offentlige delingslinks for den verificerede bruger.
  */
 caldavRouter.get('/shares', async (req: Request, res: Response) => {
   try {
-    const creds = extractCredentials(req);
-    const shares = listSharesForUser(creds.username);
+    const cookieSession = getSessionFromCookie(req);
+    if (!cookieSession) {
+      res.status(401).json({ ok: false, error: 'Kræver aktivt login.' });
+      return;
+    }
+    const shares = listSharesForUser(cookieSession.username);
     res.json({ ok: true, shares });
   } catch (err: any) {
     res.status(401).json({ ok: false, error: err?.message || 'Uautoriseret' });
@@ -337,7 +499,12 @@ caldavRouter.get('/shares', async (req: Request, res: Response) => {
  */
 caldavRouter.post('/shares', async (req: Request, res: Response) => {
   try {
-    const creds = extractCredentials(req);
+    const cookieSession = getSessionFromCookie(req);
+    if (!cookieSession) {
+      res.status(401).json({ ok: false, error: 'Kræver aktivt login.' });
+      return;
+    }
+
     const label = String(req.body?.label || 'Delt kalender').trim();
     const calendarUrls = Array.isArray(req.body?.calendarUrls) ? req.body.calendarUrls.map(String) : [];
     const calendarNames = Array.isArray(req.body?.calendarNames) ? req.body.calendarNames.map(String) : [];
@@ -349,7 +516,11 @@ caldavRouter.post('/shares', async (req: Request, res: Response) => {
     }
 
     const share = createShareLink({
-      creds,
+      creds: {
+        serverUrl: cookieSession.serverUrl,
+        username: cookieSession.username,
+        password: cookieSession.password
+      },
       label,
       calendarUrls,
       calendarNames,
@@ -369,9 +540,13 @@ caldavRouter.post('/shares', async (req: Request, res: Response) => {
  */
 caldavRouter.delete('/shares/:token', async (req: Request, res: Response) => {
   try {
-    const creds = extractCredentials(req);
-    const token = String(req.params.token || '');
-    const deleted = deleteShareLink(creds.username, token);
+    const cookieSession = getSessionFromCookie(req);
+    if (!cookieSession) {
+      res.status(401).json({ ok: false, error: 'Kræver aktivt login.' });
+      return;
+    }
+    const token = String(req.params.token || '').trim();
+    const deleted = deleteShareLink(cookieSession.username, token);
     res.json({ ok: true, deleted });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err?.message || 'Kunne ikke slette delingslink.' });
@@ -381,11 +556,18 @@ caldavRouter.delete('/shares/:token', async (req: Request, res: Response) => {
 /**
  * GET /api/caldav/public/:token
  * Offentligt Read-Only endpoint (kræver IKKE login).
- * Henter de delte kalendere og begivenheder til visning for 3. part med linket.
  */
-caldavRouter.get('/public/:token', async (req: Request, res: Response) => {
+caldavRouter.get('/public/:token', publicShareLimiter, async (req: Request, res: Response) => {
   try {
     const token = String(req.params.token || '').trim();
+    if (!/^[A-Za-z0-9_-]{12,64}$/.test(token)) {
+      res.status(404).json({
+        ok: false,
+        error: 'Ugyldigt delingslink.'
+      });
+      return;
+    }
+
     const resolved = resolveShareToken(token);
     if (!resolved) {
       res.status(404).json({
@@ -416,7 +598,6 @@ caldavRouter.get('/public/:token', async (req: Request, res: Response) => {
 
     const rawEvents = await fetchAllEvents(creds, sharedCalendars);
 
-    // Rens følsomme CalDAV-felter og anonymisér hvis hideDetails er valgt
     const sanitizedEvents: CalendarEventDTO[] = rawEvents.map((ev) => ({
       id: ev.id,
       uid: ev.uid,

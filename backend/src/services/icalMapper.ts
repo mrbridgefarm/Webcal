@@ -31,6 +31,24 @@ export interface CalendarEventDTO {
 const VIDEO_URL_REGEX = /(https?:\/\/(?:[^\s"]*zoom\.us|teams\.microsoft\.com|meet\.google\.com|jitsi\.[^\s"]+|whereby\.com)[^\s">]*)/i;
 
 /**
+ * Sikrer at eksterne URL'er fra .ics-filer kun må være http:// eller https:// (blokerer javascript: / data: XSS).
+ */
+export function sanitizeHttpUrl(raw?: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      return parsed.toString();
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Sikrer korrekt dansk UTF-8 tekst (æøå / ÆØÅ):
  * 1) Dekoder eventuelle XML/HTML numeriske og hexadecimale entiteter (&#230;, &#xE6; osv.)
  * 2) Retter evt. ISO-8859-1 / Latin-1 mojibake (f.eks. Ã¦ -> æ, Ã¸ -> ø, Ã¥ -> å, Ã† -> Æ, Ã˜ -> Ø, Ã… -> Å)
@@ -101,15 +119,15 @@ export function parseIcsToEvents(
       const description = normalizeDanishText(event.description || '');
       const location = normalizeDanishText(event.location || '');
 
-      // Udtræk evt. videomøde-link fra URL-felt, lokation eller beskrivelse
+      // Udtræk evt. videomøde-link fra URL-felt, lokation eller beskrivelse (kun http/https tilladt)
       const urlProp = veventComp.getFirstPropertyValue('url');
       const customVideoProp = veventComp.getFirstPropertyValue('x-google-conference') ||
                               veventComp.getFirstPropertyValue('x-microsoft-skypeteamsmeetingurl');
-      let videoUrl = typeof urlProp === 'string' ? urlProp : (typeof customVideoProp === 'string' ? customVideoProp : undefined);
+      let videoUrl = sanitizeHttpUrl(urlProp) || sanitizeHttpUrl(customVideoProp);
       if (!videoUrl) {
         const match = `${location} ${description}`.match(VIDEO_URL_REGEX);
         if (match) {
-          videoUrl = match[1];
+          videoUrl = sanitizeHttpUrl(match[1]);
         }
       }
 
@@ -243,8 +261,9 @@ export function buildIcsFromEvent(dto: Partial<CalendarEventDTO> & { title: stri
   if (dto.location !== undefined) {
     vevent.updatePropertyWithValue('location', dto.location || '');
   }
-  if (dto.videoUrl) {
-    vevent.updatePropertyWithValue('url', dto.videoUrl);
+  const safeVideoUrl = sanitizeHttpUrl(dto.videoUrl);
+  if (safeVideoUrl) {
+    vevent.updatePropertyWithValue('url', safeVideoUrl);
   }
 
   // Opdater deltagere / RSVP (PARTSTAT) hvis angivet

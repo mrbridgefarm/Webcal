@@ -164,6 +164,12 @@ const mapsSearchUrl = computed(() => {
   if (/^https?:\/\//i.test(location.value.trim())) return location.value.trim();
   return `https://www.openstreetmap.org/search?query=${encodeURIComponent(location.value.trim())}`;
 });
+
+const safeVideoUrl = computed(() => {
+  const raw = videoUrl.value.trim();
+  if (!raw) return '';
+  return /^https?:\/\//i.test(raw) ? raw : '';
+});
 </script>
 
 <template>
@@ -313,8 +319,8 @@ const mapsSearchUrl = computed(() => {
                   <Video class="w-3.5 h-3.5 text-sky-400" /> Videomøde-link
                 </label>
                 <a
-                  v-if="videoUrl"
-                  :href="videoUrl"
+                  v-if="safeVideoUrl"
+                  :href="safeVideoUrl"
                   target="_blank"
                   rel="noopener noreferrer"
                   class="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-semibold hover:underline"

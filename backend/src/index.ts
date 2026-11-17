@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { caldavRouter } from './routes/caldav.js';
 
 if (process.env.ALLOW_INSECURE_TLS === 'true') {
+  console.warn('[SIKKERHED] ADVARSEL: ALLOW_INSECURE_TLS=true er aktiveret. TLS-certifikater valideres ikke!');
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 
@@ -15,7 +16,51 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
-app.use(cors());
+// Skjul Express server-fingeraftryk og stol på første reverse proxy (Pangolin / Traefik / Nginx)
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+
+// Sikkerhedsheaders på alle HTTP-svar (OWASP best practices)
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "font-src 'self' data:",
+      "connect-src 'self'",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'"
+    ].join('; ')
+  );
+  next();
+});
+
+// Stram CORS: Kun samme origin i produktion (plus lokal Vite dev-server i development)
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (process.env.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
+        return callback(null, true);
+      }
+      if (process.env.ALLOWED_ORIGIN && origin === process.env.ALLOWED_ORIGIN) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
+    credentials: true
+  })
+);
+
 app.use(express.json({ limit: '5mb' }));
 
 // Healthcheck endpoint til Docker (x86_64 & ARM64)

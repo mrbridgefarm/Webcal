@@ -3,7 +3,9 @@ import { ref, computed } from 'vue';
 import { db, purgeExpiredTrash } from '../db/database';
 import {
   apiGetServerConfig,
+  apiGetSession,
   apiLoginCalDav,
+  apiLogoutCalDav,
   apiSyncCalDav,
   apiSaveEvent,
   apiDeleteEvent,
@@ -281,17 +283,19 @@ export const useCalendarStore = defineStore('calendar', () => {
     const cfg = await apiGetServerConfig();
     hasDefaultServer.value = cfg.hasDefaultServer;
 
-    // 3. Tjek gemt Mailcow-session
-    try {
-      localStorage.removeItem('dav_sync_cal_session_v1'); // Fjern evt. gammel demo-session
-      const savedSession = localStorage.getItem(SESSION_STORAGE_KEY);
-      if (savedSession) {
-        const parsed = JSON.parse(savedSession) as AuthSession;
-        if (parsed && parsed.mode === 'CALDAV' && parsed.username && parsed.password) {
-          session.value = parsed;
-        }
-      }
-    } catch {
+    // 3. Tjek krypteret HttpOnly session-cookie på serveren (fjerner evt. gamle usikre localStorage-rester)
+    localStorage.removeItem('dav_sync_cal_session_v1');
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+
+    const serverSession = await apiGetSession();
+    if (serverSession.authenticated && serverSession.username) {
+      session.value = {
+        mode: 'CALDAV',
+        serverUrl: '',
+        username: serverSession.username,
+        connectedAt: new Date().toISOString()
+      };
+    } else {
       session.value = null;
     }
 
@@ -385,15 +389,12 @@ export const useCalendarStore = defineStore('calendar', () => {
     try {
       const targetUrl = customServerUrl.trim();
       const loginRes = await apiLoginCalDav(targetUrl, username, password);
-      const newSession: AuthSession = {
+      session.value = {
         mode: 'CALDAV',
-        serverUrl: targetUrl ? loginRes.serverUrl : '',
+        serverUrl: '',
         username: loginRes.username,
-        password,
         connectedAt: new Date().toISOString()
       };
-      session.value = newSession;
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(newSession));
 
       await syncWithServer(false);
       isLoginModalOpen.value = false;
@@ -405,6 +406,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   }
 
   async function logout() {
+    await apiLogoutCalDav();
     session.value = null;
     localStorage.removeItem(SESSION_STORAGE_KEY);
     clearClipboard();
@@ -444,7 +446,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     isSyncing.value = true;
     try {
       await flushSyncQueue();
-      const res = await apiSyncCalDav(session.value);
+      const res = await apiSyncCalDav();
 
       const visibilityMap = new Map(calendars.value.map((c) => [c.id, c.visible]));
       const hiddenSet = new Set(hiddenCalendarIds.value);
@@ -521,7 +523,7 @@ export const useCalendarStore = defineStore('calendar', () => {
       return 0;
     }
 
-    const res = await apiImportIcs(session.value, calendarId, icsContent);
+    const res = await apiImportIcs(calendarId, icsContent);
     const plainImported = clonePlain(res.events);
     for (const ev of plainImported) {
       const idx = events.value.findIndex((e) => e.id === ev.id);
@@ -585,7 +587,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   async function loadShares() {
     if (session.value?.mode !== 'CALDAV') return;
     try {
-      shares.value = await apiListShares(session.value);
+      shares.value = await apiListShares();
     } catch (err) {
       console.warn('Kunne ikke hente delingslinks:', err);
     }
@@ -604,7 +606,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
 
     try {
-      const created = await apiCreateShare(session.value, {
+      const created = await apiCreateShare({
         label: params.label,
         calendarUrls: selectedCals.map((c) => c.url),
         calendarNames: selectedCals.map((c) => c.name),
@@ -622,7 +624,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   async function revokeShare(token: string) {
     if (session.value?.mode !== 'CALDAV') return;
     try {
-      await apiDeleteShare(session.value, token);
+      await apiDeleteShare(token);
       shares.value = shares.value.filter((s) => s.token !== token);
       notify('Delingslink slettet', 'Linket er nu deaktiveret og kan ikke længere tilgås.', 'info');
     } catch (err: any) {
@@ -666,7 +668,7 @@ export const useCalendarStore = defineStore('calendar', () => {
               caldavUrl: latestLocal?.caldavUrl || item.payload.event.caldavUrl,
               etag: latestLocal?.etag || item.payload.event.etag
             });
-            const saved = clonePlain(await apiSaveEvent(session.value, payloadEvent));
+            const saved = clonePlain(await apiSaveEvent(payloadEvent));
             const savedPlain = { ...saved, pendingSync: false };
             await db.events.put(savedPlain);
             const idx = events.value.findIndex((e) => e.id === item.eventId || e.id === saved.id);
@@ -674,10 +676,10 @@ export const useCalendarStore = defineStore('calendar', () => {
               events.value[idx] = savedPlain;
             }
           } else if (item.action === 'DELETE' && item.payload.caldavUrl) {
-            await apiDeleteEvent(session.value, item.payload.caldavUrl, item.payload.etag);
+            await apiDeleteEvent(item.payload.caldavUrl, item.payload.etag);
           } else if (item.action === 'RSVP' && item.payload.event && item.payload.partstat) {
             const updated = clonePlain(
-              await apiUpdateRsvp(session.value, item.payload.event, item.payload.partstat)
+              await apiUpdateRsvp(item.payload.event, item.payload.partstat)
             );
             await db.events.put({ ...updated, pendingSync: false });
             const idx = events.value.findIndex((e) => e.id === updated.id);
@@ -1230,7 +1232,6 @@ export const useCalendarStore = defineStore('calendar', () => {
     let newCal: CalendarSource;
     try {
       const created = await apiCreateCalendar(
-        session.value,
         trimmed || 'SOGo Kalender',
         color,
         trimmedUrl || undefined
@@ -1272,7 +1273,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
 
     try {
-      await apiDeleteCalendar(session.value, cal.url);
+      await apiDeleteCalendar(cal.url);
     } catch (err: any) {
       notify('Kunne ikke slette kalender', err?.message || String(err), 'error', 9000);
       return;

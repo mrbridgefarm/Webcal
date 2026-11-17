@@ -1,5 +1,4 @@
 import type {
-  AuthSession,
   CalendarSource,
   CalendarEvent,
   RsvpStatus,
@@ -8,10 +7,15 @@ import type {
 
 export interface LoginResponse {
   ok: boolean;
-  serverUrl: string;
   username: string;
   calendars: Omit<CalendarSource, 'visible'>[];
   error?: string;
+}
+
+export interface SessionCheckResponse {
+  ok: boolean;
+  authenticated: boolean;
+  username?: string;
 }
 
 export interface SyncResponse {
@@ -33,24 +37,29 @@ export interface PublicShareResponse {
   error?: string;
 }
 
-function buildAuthHeaders(session: AuthSession): Record<string, string> {
-  return {
-    'Content-Type': 'application/json; charset=utf-8',
-    'x-caldav-server': encodeURIComponent(session.serverUrl || ''),
-    'x-caldav-user': encodeURIComponent(session.username || ''),
-    'x-caldav-password': encodeURIComponent(session.password || '')
-  };
-}
-
 export async function apiGetServerConfig(): Promise<{ hasDefaultServer: boolean }> {
   try {
-    const res = await fetch('/api/caldav/config');
+    const res = await fetch('/api/caldav/config', { credentials: 'include' });
     const data = await res.json();
     return {
       hasDefaultServer: Boolean(data?.hasDefaultServer)
     };
   } catch {
     return { hasDefaultServer: true };
+  }
+}
+
+export async function apiGetSession(): Promise<SessionCheckResponse> {
+  try {
+    const res = await fetch('/api/caldav/session', { credentials: 'include' });
+    const data = await res.json();
+    return {
+      ok: Boolean(data?.ok),
+      authenticated: Boolean(data?.authenticated),
+      username: data?.username || ''
+    };
+  } catch {
+    return { ok: false, authenticated: false };
   }
 }
 
@@ -61,7 +70,8 @@ export async function apiLoginCalDav(
 ): Promise<LoginResponse> {
   const res = await fetch('/api/caldav/login', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
     body: JSON.stringify({ serverUrl, username, password })
   });
   const data = await res.json();
@@ -71,19 +81,21 @@ export async function apiLoginCalDav(
   return data;
 }
 
+export async function apiLogoutCalDav(): Promise<void> {
+  await fetch('/api/caldav/logout', {
+    method: 'POST',
+    credentials: 'include'
+  }).catch(() => {});
+}
+
 export async function apiSyncCalDav(
-  session: AuthSession,
   timeRange?: { start: string; end: string }
 ): Promise<SyncResponse> {
   const res = await fetch('/api/caldav/sync', {
     method: 'POST',
-    headers: buildAuthHeaders(session),
-    body: JSON.stringify({
-      serverUrl: session.serverUrl,
-      username: session.username,
-      password: session.password,
-      timeRange
-    })
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ timeRange })
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -92,19 +104,12 @@ export async function apiSyncCalDav(
   return data;
 }
 
-export async function apiSaveEvent(
-  session: AuthSession,
-  event: CalendarEvent
-): Promise<CalendarEvent> {
+export async function apiSaveEvent(event: CalendarEvent): Promise<CalendarEvent> {
   const res = await fetch('/api/caldav/events', {
     method: 'POST',
-    headers: buildAuthHeaders(session),
-    body: JSON.stringify({
-      serverUrl: session.serverUrl,
-      username: session.username,
-      password: session.password,
-      event
-    })
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ event })
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -113,21 +118,12 @@ export async function apiSaveEvent(
   return data.event;
 }
 
-export async function apiDeleteEvent(
-  session: AuthSession,
-  caldavUrl: string,
-  etag?: string
-): Promise<void> {
+export async function apiDeleteEvent(caldavUrl: string, etag?: string): Promise<void> {
   const res = await fetch('/api/caldav/events', {
     method: 'DELETE',
-    headers: buildAuthHeaders(session),
-    body: JSON.stringify({
-      serverUrl: session.serverUrl,
-      username: session.username,
-      password: session.password,
-      caldavUrl,
-      etag
-    })
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ caldavUrl, etag })
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -136,20 +132,14 @@ export async function apiDeleteEvent(
 }
 
 export async function apiUpdateRsvp(
-  session: AuthSession,
   event: CalendarEvent,
   partstat: RsvpStatus
 ): Promise<CalendarEvent> {
   const res = await fetch('/api/caldav/rsvp', {
     method: 'POST',
-    headers: buildAuthHeaders(session),
-    body: JSON.stringify({
-      serverUrl: session.serverUrl,
-      username: session.username,
-      password: session.password,
-      event,
-      partstat
-    })
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ event, partstat })
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -159,22 +149,15 @@ export async function apiUpdateRsvp(
 }
 
 export async function apiCreateCalendar(
-  session: AuthSession,
   name: string,
   color: string,
   calendarUrl?: string
 ): Promise<Omit<CalendarSource, 'visible'>> {
   const res = await fetch('/api/caldav/calendars', {
     method: 'POST',
-    headers: buildAuthHeaders(session),
-    body: JSON.stringify({
-      serverUrl: session.serverUrl,
-      username: session.username,
-      password: session.password,
-      name,
-      color,
-      calendarUrl
-    })
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ name, color, calendarUrl })
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -183,19 +166,12 @@ export async function apiCreateCalendar(
   return data.calendar;
 }
 
-export async function apiDeleteCalendar(
-  session: AuthSession,
-  calendarUrl: string
-): Promise<void> {
+export async function apiDeleteCalendar(calendarUrl: string): Promise<void> {
   const res = await fetch('/api/caldav/calendars', {
     method: 'DELETE',
-    headers: buildAuthHeaders(session),
-    body: JSON.stringify({
-      serverUrl: session.serverUrl,
-      username: session.username,
-      password: session.password,
-      calendarUrl
-    })
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ calendarUrl })
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -203,10 +179,10 @@ export async function apiDeleteCalendar(
   }
 }
 
-export async function apiListShares(session: AuthSession): Promise<PublicShareLink[]> {
+export async function apiListShares(): Promise<PublicShareLink[]> {
   const res = await fetch('/api/caldav/shares', {
     method: 'GET',
-    headers: buildAuthHeaders(session)
+    credentials: 'include'
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -215,24 +191,17 @@ export async function apiListShares(session: AuthSession): Promise<PublicShareLi
   return data.shares || [];
 }
 
-export async function apiCreateShare(
-  session: AuthSession,
-  params: {
-    label: string;
-    calendarUrls: string[];
-    calendarNames: string[];
-    hideDetails: boolean;
-  }
-): Promise<PublicShareLink> {
+export async function apiCreateShare(params: {
+  label: string;
+  calendarUrls: string[];
+  calendarNames: string[];
+  hideDetails: boolean;
+}): Promise<PublicShareLink> {
   const res = await fetch('/api/caldav/shares', {
     method: 'POST',
-    headers: buildAuthHeaders(session),
-    body: JSON.stringify({
-      serverUrl: session.serverUrl,
-      username: session.username,
-      password: session.password,
-      ...params
-    })
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(params)
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -241,10 +210,10 @@ export async function apiCreateShare(
   return data.share;
 }
 
-export async function apiDeleteShare(session: AuthSession, token: string): Promise<void> {
+export async function apiDeleteShare(token: string): Promise<void> {
   const res = await fetch(`/api/caldav/shares/${encodeURIComponent(token)}`, {
     method: 'DELETE',
-    headers: buildAuthHeaders(session)
+    credentials: 'include'
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -262,20 +231,14 @@ export async function apiFetchPublicShare(token: string): Promise<PublicShareRes
 }
 
 export async function apiImportIcs(
-  session: AuthSession,
   calendarId: string,
   icsContent: string
 ): Promise<{ importedCount: number; events: CalendarEvent[] }> {
   const res = await fetch('/api/caldav/import', {
     method: 'POST',
-    headers: buildAuthHeaders(session),
-    body: JSON.stringify({
-      serverUrl: session.serverUrl,
-      username: session.username,
-      password: session.password,
-      calendarId,
-      icsContent
-    })
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ calendarId, icsContent })
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -293,6 +256,7 @@ export async function apiExportIcs(
 ): Promise<string> {
   const res = await fetch('/api/caldav/export', {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
     body: JSON.stringify({ events, calendarName })
   });

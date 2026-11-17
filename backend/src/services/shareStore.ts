@@ -71,6 +71,19 @@ function decryptText(payload: string): string {
   return dec.toString('utf8');
 }
 
+export function encryptJson(obj: unknown): string {
+  return encryptText(JSON.stringify(obj));
+}
+
+export function decryptJson<T>(token: string): T | null {
+  try {
+    const json = decryptText(token);
+    return JSON.parse(json) as T;
+  } catch {
+    return null;
+  }
+}
+
 function readAllShares(): ShareRecord[] {
   ensureDataDir();
   if (!fs.existsSync(SHARES_FILE)) {
