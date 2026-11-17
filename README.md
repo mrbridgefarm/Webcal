@@ -1,6 +1,6 @@
 # 📅 DAV-Sync Cal
 
-**En lynhurtig, tastatur-venlig webkalender bygget til personlig planlægning, vagtplanlægning og time-blocking — med direkte Mailcow / SOGo CalDAV-integration, offline PWA-understøttelse og enterprise-grade sikkerhed.**
+**En lynhurtig, tastatur-venlig webkalender bygget til personlig planlægning, vagtplanlægning og time-blocking — med direkte CalDAV-integration (kompatibel med bl.a. Mailcow/SOGo, Nextcloud, Radicale og Baïkal), offline PWA-understøttelse og enterprise-grade sikkerhed.**
 
 ### Kalenderoversigt (5 visninger, ugenumre, bundplaceret udklipsholder & kompakte farvekasser)
 ![DAV-Sync Cal Kalenderoversigt](docs/preview.svg)
@@ -12,7 +12,7 @@
 
 ## 🎯 Vision & Filosofi
 
-Traditionelle webkalendere kræver ofte utallige museklik og formularer, når man skal planlægge vagter, gentage fokusblokke eller flytte aftaler rundt på tværs af ugen. **DAV-Sync Cal** kombinerer alle klassiske kalenderfunktioner med **ægte "Excel-lignende" Copy/Paste-workflows (`Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+Z`)** direkte i webbrowseren, samtidig med at alt synkroniseres tovejs med din **Mailcow / SOGo**-server.
+Traditionelle webkalendere kræver ofte utallige museklik og formularer, når man skal planlægge vagter, gentage fokusblokke eller flytte aftaler rundt på tværs af ugen. **DAV-Sync Cal** kombinerer alle klassiske kalenderfunktioner med **ægte "Excel-lignende" Copy/Paste-workflows (`Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+Z`)** direkte i webbrowseren, samtidig med at alt synkroniseres tovejs med din **CalDAV-server** (f.eks. Mailcow/SOGo, Nextcloud, Radicale, Baïkal m.fl.).
 
 ---
 
@@ -69,15 +69,17 @@ Traditionelle webkalendere kræver ofte utallige museklik og formularer, når ma
 
 ---
 
-## 🔐 Mailcow & SOGo CalDAV Integration
+## 🔐 Universel CalDAV-Integration
 
-* **Sikker Mailcow Login:** Forbindes direkte til din Mailcow / SOGo CalDAV-tjeneste.
-* **Skjult serveradresse:** Serverens URL hentes direkte fra miljøvariablen `DEFAULT_CALDAV_URL`, så brugere blot logger ind med e-mail og adgangskode. Der er mulighed for at folde en "Skift server"-boks ud efter behov.
+DAV-Sync Cal understøtter alle standard **CalDAV-servere** (RFC 4791) — herunder **Mailcow / SOGo**, **Nextcloud**, **Radicale**, **Baïkal**, **Fastmail** m.fl.:
+
+* **Sikker CalDAV Login:** Forbindes direkte til din ønskede CalDAV-server med e-mail/brugernavn og adgangskode (eller app-adgangskode).
+* **Skjult serveradresse:** Standardserverens URL hentes direkte fra miljøvariablen `DEFAULT_CALDAV_URL`, så brugere blot logger ind uden at se serveradressen. Der er mulighed for at folde en "Skift server"-boks ud efter behov.
 * **Administration af kalendere:**
   * Opret nye kalendere direkte på serveren (`MKCALENDAR`).
   * Tilføj eksterne eller delte CalDAV-links.
   * Skjul eller gendan kalendere fra oversigten, eller slet egne kalendere permanent.
-* **Farvestyring:** Automatisk tovejs-synkronisering af SOGo's kalenderfarver med mulighed for lokal tilpasning.
+* **Farvestyring:** Automatisk tovejs-synkronisering af serverens kalenderfarver (`calendar-color`, bl.a. fra SOGo/Nextcloud) med mulighed for lokal tilpasning.
 * **RSVP & Møder:** Se status for deltagere og besvar invitationer (**Deltager**, **Måske**, **Afvis**) direkte i appen.
 * **Tidszoner & Notifikationer:** Fuld understøttelse af `VTIMEZONE` og browsernotifikationer via `VALARM`.
 
@@ -137,7 +139,7 @@ I **Pangolin** kan du pege direkte på **`http://dav-sync-cal:3000`** (eller til
 | Variabel | Standard | Beskrivelse |
 | :--- | :--- | :--- |
 | `PORT` | `3000` | Porten som webkalenderen og CalDAV-proxyen lytter på |
-| `DEFAULT_CALDAV_URL` | *(tom)* | Standard Mailcow / SOGo URL (f.eks. `https://mail.ditdomæne.dk/SOGo/dav/`) |
+| `DEFAULT_CALDAV_URL` | *(tom)* | Standard CalDAV-server URL (f.eks. `https://mail.ditdomæne.dk/SOGo/dav/` eller `https://cloud.ditdomæne.dk/remote.php/dav/`) |
 | `ALLOW_INSECURE_TLS` | `false` | Sæt til `true`, hvis din CalDAV-server anvender et selv-signeret certifikat på lokalt LAN |
 | `DATA_DIR` | `/app/data` | Mappen hvor delte kalenderlinks og tokens gemmes persistent |
 
