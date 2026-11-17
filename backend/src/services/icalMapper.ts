@@ -284,3 +284,28 @@ function createBaseCalendarComponent(): ICAL.Component {
   vcalendar.updatePropertyWithValue('calscale', 'GREGORIAN');
   return vcalendar;
 }
+
+/**
+ * Bygger en samlet .ics fil (VCALENDAR med alle VEVENTs) til eksport af en hel kalender.
+ */
+export function buildCalendarExportIcs(events: CalendarEventDTO[], calendarName = 'DAV-Sync Cal'): string {
+  const vcalendar = createBaseCalendarComponent();
+  vcalendar.updatePropertyWithValue('x-wr-calname', calendarName);
+
+  for (const dto of events) {
+    try {
+      const singleIcs = buildIcsFromEvent(dto);
+      const parsed = ICAL.parse(singleIcs);
+      const comp = new ICAL.Component(parsed);
+      const vevent = comp.getFirstSubcomponent('vevent');
+      if (vevent) {
+        vcalendar.addSubcomponent(vevent);
+      }
+    } catch (err) {
+      console.warn('Kunne ikke eksportere enkelt VEVENT:', err);
+    }
+  }
+
+  return vcalendar.toString();
+}
+

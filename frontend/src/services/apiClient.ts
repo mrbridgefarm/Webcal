@@ -260,3 +260,45 @@ export async function apiFetchPublicShare(token: string): Promise<PublicShareRes
   }
   return data;
 }
+
+export async function apiImportIcs(
+  session: AuthSession,
+  calendarId: string,
+  icsContent: string
+): Promise<{ importedCount: number; events: CalendarEvent[] }> {
+  const res = await fetch('/api/caldav/import', {
+    method: 'POST',
+    headers: buildAuthHeaders(session),
+    body: JSON.stringify({
+      serverUrl: session.serverUrl,
+      username: session.username,
+      password: session.password,
+      calendarId,
+      icsContent
+    })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke importere .ics-filen.');
+  }
+  return {
+    importedCount: data.importedCount || 0,
+    events: data.events || []
+  };
+}
+
+export async function apiExportIcs(
+  events: CalendarEvent[],
+  calendarName: string
+): Promise<string> {
+  const res = await fetch('/api/caldav/export', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ events, calendarName })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke eksportere kalenderen.');
+  }
+  return data.icsContent;
+}

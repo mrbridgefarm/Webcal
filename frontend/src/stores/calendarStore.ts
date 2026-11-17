@@ -13,7 +13,9 @@ import {
   apiListShares,
   apiCreateShare,
   apiDeleteShare,
-  apiFetchPublicShare
+  apiFetchPublicShare,
+  apiImportIcs,
+  apiExportIcs
 } from '../services/apiClient';
 import { startReminderWatcher } from '../services/notifications';
 import type {
@@ -128,6 +130,8 @@ export const useCalendarStore = defineStore('calendar', () => {
   const isTrashModalOpen = ref<boolean>(false);
   const isShareModalOpen = ref<boolean>(false);
   const preselectedShareCalendarId = ref<string>('');
+  const isImportExportModalOpen = ref<boolean>(false);
+  const preselectedImportExportCalendarId = ref<string>('');
   const editingEvent = ref<CalendarEvent | null>(null);
   const isEventModalOpen = ref<boolean>(false);
   const toasts = ref<ToastMessage[]>([]);
@@ -501,6 +505,73 @@ export const useCalendarStore = defineStore('calendar', () => {
     } finally {
       isSyncing.value = false;
     }
+  }
+
+  // --- Import / Eksport (.ics) ---
+  function openImportExportModal(calendarId?: string) {
+    if (isPublicShareMode.value) return;
+    preselectedImportExportCalendarId.value = calendarId || activeTargetCalendarId.value || writableCalendars.value[0]?.id || '';
+    isImportExportModalOpen.value = true;
+  }
+
+  async function importIcsFile(calendarId: string, icsContent: string): Promise<number> {
+    if (!session.value || session.value.mode !== 'CALDAV') return 0;
+    if (isCalendarReadOnly(calendarId)) {
+      notify('Skrivebeskyttet kalender', 'Vælg en skrivbar kalender til import.', 'error');
+      return 0;
+    }
+
+    const res = await apiImportIcs(session.value, calendarId, icsContent);
+    const plainImported = clonePlain(res.events);
+    for (const ev of plainImported) {
+      const idx = events.value.findIndex((e) => e.id === ev.id);
+      if (idx !== -1) {
+        events.value[idx] = ev;
+      } else {
+        events.value.push(ev);
+      }
+    }
+    await db.events.bulkPut(plainImported);
+    notify(
+      'Import gennemført!',
+      `Importerede ${res.importedCount} begivenhed(er) til kalenderen.`,
+      'success'
+    );
+    return res.importedCount;
+  }
+
+  async function exportCalendarIcs(calendarIdOrAll: string): Promise<void> {
+    const isAll = calendarIdOrAll === 'ALL';
+    const targetEvents = isAll
+      ? clonePlain(visibleEvents.value)
+      : clonePlain(events.value.filter((e) => e.calendarId === calendarIdOrAll));
+    const calName = isAll
+      ? 'Alle-Kalendere'
+      : (getCalendarById(calendarIdOrAll)?.name || 'Kalender');
+
+    if (targetEvents.length === 0) {
+      notify('Ingen begivenheder', 'Den valgte kalender indeholder ingen begivenheder at eksportere.', 'warning');
+      return;
+    }
+
+    const icsContent = await apiExportIcs(targetEvents, calName);
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeFile = calName.replace(/[^a-zA-Z0-9æøåÆØÅ_-]+/g, '_');
+    const datePart = toDateOnlyString(new Date());
+    a.href = url;
+    a.download = `${safeFile}-${datePart}.ics`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    notify(
+      'Kalender eksporteret (.ics)',
+      `Downloadede ${targetEvents.length} begivenhed(er) fra "${calName}".`,
+      'success'
+    );
   }
 
   // --- Offentlig Deling (Share Links til 3. part) ---
@@ -1336,6 +1407,8 @@ export const useCalendarStore = defineStore('calendar', () => {
     isTrashModalOpen,
     isShareModalOpen,
     preselectedShareCalendarId,
+    isImportExportModalOpen,
+    preselectedImportExportCalendarId,
     editingEvent,
     isEventModalOpen,
     toasts,
@@ -1365,6 +1438,9 @@ export const useCalendarStore = defineStore('calendar', () => {
     loadShares,
     createShare,
     revokeShare,
+    openImportExportModal,
+    importIcsFile,
+    exportCalendarIcs,
     toggleCalendarVisibility,
     setCalendarColorOverride,
     saveEvent,

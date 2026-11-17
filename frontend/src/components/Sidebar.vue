@@ -12,7 +12,8 @@ import {
   Clock,
   Plus,
   EyeOff,
-  Share2
+  Share2,
+  ArrowUpDown
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../stores/calendarStore';
 import { requestNotificationPermission } from '../services/notifications';
@@ -442,14 +443,27 @@ function removeSingleClipboardEvent(evId: string) {
         </p>
       </div>
 
-      <button
-        type="button"
-        class="w-full flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-xs text-blue-300 font-semibold transition"
-        @click="store.openShareModal()"
-      >
-        <Share2 class="w-3.5 h-3.5 shrink-0" />
-        <span class="truncate">Del kalender (Link)</span>
-      </button>
+      <div class="grid grid-cols-2 gap-1.5">
+        <button
+          type="button"
+          class="flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/30 text-xs text-blue-300 font-semibold transition"
+          title="Del kalender via offentligt Read-Only link"
+          @click="store.openShareModal()"
+        >
+          <Share2 class="w-3.5 h-3.5 shrink-0" />
+          <span class="truncate">Del link</span>
+        </button>
+
+        <button
+          type="button"
+          class="flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 text-xs text-slate-200 font-semibold transition"
+          title="Importér eller eksportér kalender (.ics)"
+          @click="store.openImportExportModal()"
+        >
+          <ArrowUpDown class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span class="truncate">Import/Eksport</span>
+        </button>
+      </div>
 
       <button
         type="button"

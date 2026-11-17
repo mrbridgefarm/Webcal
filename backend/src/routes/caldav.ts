@@ -10,7 +10,13 @@ import {
   createCalDavCalendar,
   deleteCalDavCalendar
 } from '../services/davClient.js';
-import { CalendarEventDTO, AttendeeDTO } from '../services/icalMapper.js';
+import {
+   CalendarEventDTO,
+  AttendeeDTO,
+  parseIcsToEvents,
+  buildCalendarExportIcs,
+  normalizeDanishText
+} from '../services/icalMapper.js';
 import {
   listSharesForUser,
   createShareLink,
@@ -229,6 +235,84 @@ caldavRouter.post('/rsvp', async (req: Request, res: Response) => {
     res.status(500).json({
       ok: false,
       error: err?.message || 'Kunne ikke opdatere mødesvar på CalDAV-serveren.'
+    });
+  }
+});
+
+/**
+ * POST /api/caldav/import
+ * Importerer en .ics fil (med én eller flere VEVENTs) ind i en valgt Mailcow/SOGo kalender.
+ */
+caldavRouter.post('/import', async (req: Request, res: Response) => {
+  try {
+    const creds = extractCredentials(req);
+    const calendarId = String(req.body?.calendarId || '').trim();
+    const rawIcs = normalizeDanishText(String(req.body?.icsContent || ''));
+
+    if (!calendarId || !rawIcs.includes('BEGIN:VCALENDAR')) {
+      res.status(400).json({
+        ok: false,
+        error: 'Ugyldig .ics-fil eller manglende mål-kalender.'
+      });
+      return;
+    }
+
+    const parsedEvents = parseIcsToEvents(rawIcs, calendarId);
+    if (parsedEvents.length === 0) {
+      res.status(400).json({
+        ok: false,
+        error: 'Ingen gyldige begivenheder (VEVENT) fundet i .ics-filen.'
+      });
+      return;
+    }
+
+    const savedEvents: CalendarEventDTO[] = [];
+    for (const ev of parsedEvents) {
+      // Generér ny UID så importerede begivenheder altid oprettes rent i mål-kalenderen
+      const saved = await saveCalDavEvent(creds, {
+        ...ev,
+        calendarId,
+        uid: crypto.randomUUID(),
+        caldavUrl: undefined,
+        etag: undefined,
+        rawIcs: undefined
+      });
+      savedEvents.push(saved);
+    }
+
+    res.json({
+      ok: true,
+      importedCount: savedEvents.length,
+      events: savedEvents
+    });
+  } catch (err: any) {
+    console.error('Fejl ved ICS import:', err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke importere .ics-filen til kalenderen.'
+    });
+  }
+});
+
+/**
+ * POST /api/caldav/export
+ * Genererer en samlet .ics-fil ud fra de valgte begivenheder.
+ */
+caldavRouter.post('/export', async (req: Request, res: Response) => {
+  try {
+    const events = Array.isArray(req.body?.events) ? (req.body.events as CalendarEventDTO[]) : [];
+    const calendarName = String(req.body?.calendarName || 'Kalender').trim();
+    const icsContent = buildCalendarExportIcs(events, calendarName);
+
+    res.json({
+      ok: true,
+      icsContent
+    });
+  } catch (err: any) {
+    console.error('Fejl ved ICS eksport:', err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke eksportere kalenderen til .ics.'
     });
   }
 });

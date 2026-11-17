@@ -8,6 +8,7 @@ import EventModal from './components/EventModal.vue';
 import TrashModal from './components/TrashModal.vue';
 import LoginModal from './components/LoginModal.vue';
 import ShareModal from './components/ShareModal.vue';
+import ImportExportModal from './components/ImportExportModal.vue';
 import { useCalendarStore } from './stores/calendarStore';
 import {
   X,
@@ -88,6 +89,7 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
     if (store.isEventModalOpen) store.isEventModalOpen = false;
     if (store.isTrashModalOpen) store.isTrashModalOpen = false;
     if (store.isShareModalOpen) store.isShareModalOpen = false;
+    if (store.isImportExportModalOpen) store.isImportExportModalOpen = false;
     if (store.isLoginModalOpen && store.isAuthenticated) store.isLoginModalOpen = false;
     return;
   }
@@ -99,7 +101,8 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
     store.isEventModalOpen ||
     store.isLoginModalOpen ||
     store.isTrashModalOpen ||
-    store.isShareModalOpen
+    store.isShareModalOpen ||
+    store.isImportExportModalOpen
   ) {
     return;
   }
@@ -244,6 +247,7 @@ onUnmounted(() => {
       <EventModal />
       <TrashModal />
       <ShareModal />
+      <ImportExportModal />
     </template>
 
     <!-- LoginModal (krævet før man kan se noget, medmindre man åbner et offentligt delingslink) -->
