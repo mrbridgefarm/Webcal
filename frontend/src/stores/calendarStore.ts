@@ -411,7 +411,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     localStorage.removeItem(SESSION_STORAGE_KEY);
     clearClipboard();
     selectedEventIds.value = [];
-    undoStack.value = [];
+    clearUndoStack();
     calendars.value = [];
     events.value = [];
     shares.value = [];
@@ -745,16 +745,44 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
   }
 
-  // --- CRUD på Begivenheder + Undo (Ctrl+Z) + Papirkurv ---
+  // --- CRUD på Begivenheder + Undo (Ctrl+Z, automatisk udløb efter 30 sek.) + Papirkurv ---
+  const UNDO_TTL_MS = 30_000;
+  const undoTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function clearUndoTimer(id: string) {
+    const timer = undoTimers.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      undoTimers.delete(id);
+    }
+  }
+
+  function clearUndoStack() {
+    undoTimers.forEach((timer) => clearTimeout(timer));
+    undoTimers.clear();
+    undoStack.value = [];
+  }
+
   function pushUndo(label: string, undoFn: () => Promise<void>) {
+    const id = generateId();
     undoStack.value.push({
-      id: generateId(),
+      id,
       label,
       timestamp: new Date().toISOString(),
       undo: undoFn
     });
+
+    const timer = setTimeout(() => {
+      undoTimers.delete(id);
+      undoStack.value = undoStack.value.filter((item) => item.id !== id);
+    }, UNDO_TTL_MS);
+    undoTimers.set(id, timer);
+
     if (undoStack.value.length > 50) {
-      undoStack.value.shift();
+      const removed = undoStack.value.shift();
+      if (removed) {
+        clearUndoTimer(removed.id);
+      }
     }
   }
 
@@ -765,6 +793,7 @@ export const useCalendarStore = defineStore('calendar', () => {
       notify('Intet at fortryde', 'Fortryd-historikken er tom.', 'info');
       return;
     }
+    clearUndoTimer(last.id);
     await last.undo();
     notify('Handling fortrudt (Ctrl+Z)', last.label, 'success');
   }
