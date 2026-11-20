@@ -26,6 +26,11 @@ import {
   encryptJson,
   decryptJson
 } from '../services/shareStore.js';
+import {
+  addUserSubscription,
+  removeUserSubscription,
+  syncUserSubscriptions
+} from '../services/subscriptionService.js';
 
 export const caldavRouter = Router();
 
@@ -260,13 +265,16 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
     const creds = extractCredentials(req);
     const timeRange = req.body?.timeRange as { start: string; end: string } | undefined;
 
-    const calendars = await fetchCalendars(creds);
-    const events = await fetchAllEvents(creds, calendars, timeRange);
+    const [caldavCalendars, subData] = await Promise.all([
+      fetchCalendars(creds),
+      syncUserSubscriptions(creds)
+    ]);
+    const caldavEvents = await fetchAllEvents(creds, caldavCalendars, timeRange);
 
     res.json({
       ok: true,
-      calendars,
-      events,
+      calendars: [...caldavCalendars, ...subData.calendars],
+      events: [...caldavEvents, ...subData.events],
       syncedAt: new Date().toISOString()
     });
   } catch (err: any) {
@@ -368,6 +376,60 @@ caldavRouter.delete('/calendars', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Fejl ved sletning af kalender:', err?.message || err);
     res.status(500).json({ ok: false, error: err?.message || 'Kunne ikke slette kalenderen.' });
+  }
+});
+
+/**
+ * POST /api/caldav/subscriptions
+ * Abonnerer på en ekstern .ics / webcal:// kalender (Google, Microsoft, Apple m.fl.) eller Danske Helligdage.
+ */
+caldavRouter.post('/subscriptions', async (req: Request, res: Response) => {
+  try {
+    const creds = extractCredentials(req);
+    const subscriptionUrl = String(req.body?.subscriptionUrl || '').trim();
+    const name = req.body?.name ? String(req.body.name).trim() : undefined;
+    const color = req.body?.color ? String(req.body.color).trim() : undefined;
+
+    if (!subscriptionUrl) {
+      res.status(400).json({ ok: false, error: 'Abonnements-URL mangler.' });
+      return;
+    }
+
+    const result = await addUserSubscription(creds, { name, subscriptionUrl, color });
+    res.json({
+      ok: true,
+      calendar: result.calendar,
+      events: result.events
+    });
+  } catch (err: any) {
+    console.error('Fejl ved oprettelse af kalender-abonnement:', err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke tilføje kalender-abonnement.'
+    });
+  }
+});
+
+/**
+ * DELETE /api/caldav/subscriptions
+ * Afmelder og fjerner et kalender-abonnement.
+ */
+caldavRouter.delete('/subscriptions', async (req: Request, res: Response) => {
+  try {
+    const creds = extractCredentials(req);
+    const id = String(req.body?.id || '').trim();
+    if (!id) {
+      res.status(400).json({ ok: false, error: 'Abonnements-ID mangler.' });
+      return;
+    }
+    removeUserSubscription(creds, id);
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error('Fejl ved afmelding af abonnement:', err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke afmelde kalender-abonnement.'
+    });
   }
 });
 

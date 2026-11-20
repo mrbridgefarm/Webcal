@@ -20,6 +20,8 @@ export interface CalendarInfoDTO {
   serverColor: string;
   readOnly: boolean;
   isShared: boolean;
+  isSubscribed?: boolean;
+  subscriptionUrl?: string;
   owner?: string;
   ctag?: string;
   url: string;

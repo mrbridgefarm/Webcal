@@ -78,15 +78,27 @@ export function normalizeDanishText(input?: string | null): string {
   return text;
 }
 
+function formatIcalDate(dt: ICAL.Time | null | undefined, allDay: boolean): string {
+  if (!dt) return new Date().toISOString();
+  if (allDay) {
+    const y = String(dt.year).padStart(4, '0');
+    const m = String(dt.month).padStart(2, '0');
+    const d = String(dt.day).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return dt.toJSDate().toISOString();
+}
+
 /**
- * Parser en rå iCalendar (.ics) streng fra Mailcow/SOGo til et struktureret CalendarEventDTO.
- * Understøtter VTIMEZONE via ical.js TimezoneService, ATTENDEE/PARTSTAT (RSVP) og VALARM.
+ * Parser en rå iCalendar (.ics) streng til strukturerede CalendarEventDTO-objekter.
+ * Understøtter VTIMEZONE via ical.js TimezoneService, ATTENDEE/PARTSTAT (RSVP), VALARM og RRULE-udrulning for abonnementer.
  */
 export function parseIcsToEvents(
   rawIcs: string,
   calendarId: string,
   caldavUrl?: string,
-  etag?: string
+  etag?: string,
+  includeRawIcs = true
 ): CalendarEventDTO[] {
   try {
     const jcalData = ICAL.parse(rawIcs);
@@ -102,10 +114,19 @@ export function parseIcsToEvents(
     }
 
     const vevents = vcalendar.getAllSubcomponents('vevent');
+    const keepRawIcs = includeRawIcs && vevents.length === 1;
     const results: CalendarEventDTO[] = [];
+
+    const nowYear = new Date().getFullYear();
+    const minExpandMs = new Date(nowYear - 1, 0, 1).getTime();
+    const maxExpandMs = new Date(nowYear + 2, 11, 31, 23, 59, 59).getTime();
 
     for (const veventComp of vevents) {
       const event = new ICAL.Event(veventComp);
+      // Spring enkelt-forekomster med RECURRENCE-ID over hvis vi ruller hovedbegivenheden ud i et abonnement
+      if (!keepRawIcs && event.isRecurrenceException()) {
+        continue;
+      }
       const uid = event.uid || crypto.randomUUID();
       const startDate = event.startDate;
       const endDate = event.endDate || startDate;
@@ -113,8 +134,8 @@ export function parseIcsToEvents(
       const allDay = Boolean(startDate?.isDate);
       const timezone = startDate?.zone?.tzid || 'Europe/Copenhagen';
 
-      const startIso = startDate ? startDate.toJSDate().toISOString() : new Date().toISOString();
-      const endIso = endDate ? endDate.toJSDate().toISOString() : startIso;
+      const startIso = formatIcalDate(startDate, allDay);
+      const endIso = formatIcalDate(endDate, allDay);
 
       const description = normalizeDanishText(event.description || '');
       const location = normalizeDanishText(event.location || '');
@@ -172,11 +193,53 @@ export function parseIcsToEvents(
         }
       }
 
+      const baseTitle = normalizeDanishText(event.summary) || '(Ingen titel)';
+
+      if (!keepRawIcs && event.isRecurring()) {
+        try {
+          const iter = event.iterator();
+          let nextDt: ICAL.Time | null = iter.next();
+          let count = 0;
+          while (nextDt && count < 200) {
+            const occMs = nextDt.toJSDate().getTime();
+            if (occMs > maxExpandMs) break;
+            if (occMs >= minExpandMs) {
+              const details = event.getOccurrenceDetails(nextDt);
+              const occAllDay = Boolean(details.startDate?.isDate);
+              const occStart = formatIcalDate(details.startDate, occAllDay);
+              const occEnd = formatIcalDate(details.endDate || details.startDate, occAllDay);
+              const occUid = `${uid}_${occStart.slice(0, 10)}`;
+              results.push({
+                id: `${calendarId}::${occUid}`,
+                uid: occUid,
+                calendarId,
+                title: normalizeDanishText(details.item.summary) || baseTitle,
+                start: occStart,
+                end: occEnd,
+                allDay: occAllDay,
+                description,
+                location,
+                videoUrl,
+                timezone,
+                attendees,
+                organizer,
+                reminderMinutes
+              });
+            }
+            nextDt = iter.next();
+            count++;
+          }
+          continue;
+        } catch {
+          // Fald tilbage til enkeltstående begivenhed hvis RRULE-udrulning fejler
+        }
+      }
+
       results.push({
         id: `${calendarId}::${uid}`,
         uid,
         calendarId,
-        title: normalizeDanishText(event.summary) || '(Ingen titel)',
+        title: baseTitle,
         start: startIso,
         end: endIso,
         allDay,
@@ -189,7 +252,7 @@ export function parseIcsToEvents(
         reminderMinutes,
         etag,
         caldavUrl,
-        rawIcs
+        rawIcs: keepRawIcs ? rawIcs : undefined
       });
     }
 

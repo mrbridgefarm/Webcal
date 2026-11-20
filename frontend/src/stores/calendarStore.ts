@@ -17,7 +17,9 @@ import {
   apiDeleteShare,
   apiFetchPublicShare,
   apiImportIcs,
-  apiExportIcs
+  apiExportIcs,
+  apiSubscribeCalendar,
+  apiUnsubscribeCalendar
 } from '../services/apiClient';
 import { startReminderWatcher } from '../services/notifications';
 import type {
@@ -1292,10 +1294,92 @@ export const useCalendarStore = defineStore('calendar', () => {
     return newCal;
   }
 
+  async function subscribeToCalendar(subscriptionUrl: string, name?: string, color?: string) {
+    if (isPublicShareMode.value || session.value?.mode !== 'CALDAV') return null;
+    const trimmedUrl = subscriptionUrl.trim();
+    if (!trimmedUrl) {
+      notify('URL mangler', 'Indsæt et iCal / .ics link eller vælg Danske Helligdage.', 'warning');
+      return null;
+    }
+
+    if (!isOnline.value) {
+      notify('Offline', 'Du skal være online for at abonnere på en kalender.', 'warning');
+      return null;
+    }
+
+    try {
+      const result = await apiSubscribeCalendar({
+        name: name?.trim() || undefined,
+        subscriptionUrl: trimmedUrl,
+        color
+      });
+
+      const overrides = loadColorOverrides();
+      const localColor = overrides[result.calendar.id] || null;
+      const newCal: CalendarSource = clonePlain({
+        ...result.calendar,
+        color: localColor || result.calendar.color,
+        localColorOverride: localColor,
+        visible: true,
+        isSubscribed: true,
+        readOnly: true
+      });
+
+      hiddenCalendarIds.value = hiddenCalendarIds.value.filter((id) => id !== newCal.id);
+      persistHiddenCalendars();
+
+      const existingIdx = calendars.value.findIndex((c) => c.id === newCal.id);
+      if (existingIdx !== -1) {
+        calendars.value[existingIdx] = newCal;
+      } else {
+        calendars.value.push(newCal);
+      }
+
+      // Opdater begivenheder for dette abonnement
+      const otherEvents = events.value.filter((e) => e.calendarId !== newCal.id);
+      const subEvents = clonePlain(result.events || []);
+      events.value = [...otherEvents, ...subEvents];
+
+      await db.transaction('rw', db.calendars, db.events, async () => {
+        await db.calendars.put(clonePlain(newCal));
+        const oldIds = await db.events.where('calendarId').equals(newCal.id).primaryKeys();
+        if (oldIds.length > 0) {
+          await db.events.bulkDelete(oldIds);
+        }
+        if (subEvents.length > 0) {
+          await db.events.bulkPut(subEvents);
+        }
+      });
+
+      notify(
+        'Abonnement tilføjet',
+        `"${newCal.name}" (${subEvents.length} begivenheder) er nu aktiv.`,
+        'success'
+      );
+      return newCal;
+    } catch (err: any) {
+      notify('Kunne ikke abonnere på kalender', err?.message || String(err), 'error', 9000);
+      return null;
+    }
+  }
+
   async function deleteCalendar(calId: string) {
     if (isPublicShareMode.value || session.value?.mode !== 'CALDAV') return;
     const cal = getCalendarById(calId);
     if (!cal) return;
+
+    if (cal.isSubscribed || cal.id.startsWith('sub::')) {
+      try {
+        await apiUnsubscribeCalendar(cal.id);
+      } catch (err: any) {
+        notify('Kunne ikke afmelde abonnement', err?.message || String(err), 'error', 9000);
+        return;
+      }
+      await removeCalendarLocally(calId);
+      notify('Abonnement afmeldt', `"${cal.name}" er fjernet fra dine kalendere.`, 'info');
+      return;
+    }
+
     if (cal.readOnly || cal.isShared) {
       notify('Kan ikke slettes', 'Delte kalendere kan kun fjernes fra listen, ikke slettes.', 'warning');
       return;
@@ -1488,6 +1572,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     openCreateEventModal,
     openEditEventModal,
     createCalendar,
+    subscribeToCalendar,
     deleteCalendar,
     hideCalendar,
     restoreHiddenCalendars

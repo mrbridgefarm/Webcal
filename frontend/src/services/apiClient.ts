@@ -266,3 +266,37 @@ export async function apiExportIcs(
   }
   return data.icsContent;
 }
+
+export async function apiSubscribeCalendar(params: {
+  name?: string;
+  subscriptionUrl: string;
+  color?: string;
+}): Promise<{ calendar: Omit<CalendarSource, 'visible'>; events: CalendarEvent[] }> {
+  const res = await fetch('/api/caldav/subscriptions', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(params)
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke abonnere på kalenderen.');
+  }
+  return {
+    calendar: data.calendar,
+    events: data.events || []
+  };
+}
+
+export async function apiUnsubscribeCalendar(id: string): Promise<void> {
+  const res = await fetch('/api/caldav/subscriptions', {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ id })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke afmelde kalender-abonnementet.');
+  }
+}

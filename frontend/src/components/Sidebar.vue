@@ -13,7 +13,8 @@ import {
   Plus,
   EyeOff,
   Share2,
-  ArrowUpDown
+  ArrowUpDown,
+  Rss
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../stores/calendarStore';
 import { requestNotificationPermission } from '../services/notifications';
@@ -32,6 +33,7 @@ const notifPermission = ref<string>(
 );
 
 const showNewCalendarForm = ref(false);
+const addCalendarMode = ref<'CALDAV' | 'SUBSCRIBE'>('SUBSCRIBE');
 const newCalendarName = ref('');
 const newCalendarUrl = ref('');
 const newCalendarColor = ref('#7c3aed');
@@ -40,6 +42,20 @@ const isCreatingCalendar = ref(false);
 async function submitNewCalendar() {
   isCreatingCalendar.value = true;
   try {
+    if (addCalendarMode.value === 'SUBSCRIBE') {
+      const sub = await store.subscribeToCalendar(
+        newCalendarUrl.value,
+        newCalendarName.value || undefined,
+        newCalendarColor.value
+      );
+      if (sub) {
+        newCalendarName.value = '';
+        newCalendarUrl.value = '';
+        showNewCalendarForm.value = false;
+      }
+      return;
+    }
+
     const created = await store.createCalendar(
       newCalendarName.value,
       newCalendarColor.value,
@@ -55,10 +71,27 @@ async function submitNewCalendar() {
   }
 }
 
-async function confirmDeleteCalendar(calId: string, name: string) {
-  const ok = window.confirm(
-    `Slet kalenderen "${name}" permanent?\n\nAlle begivenheder i kalenderen slettes også på serveren. Dette kan ikke fortrydes.`
-  );
+async function quickSubscribeDanishHolidays() {
+  isCreatingCalendar.value = true;
+  try {
+    const sub = await store.subscribeToCalendar(
+      'builtin://dk-holidays',
+      'Danske Helligdage',
+      '#e11d48'
+    );
+    if (sub) {
+      showNewCalendarForm.value = false;
+    }
+  } finally {
+    isCreatingCalendar.value = false;
+  }
+}
+
+async function confirmDeleteCalendar(calId: string, name: string, isSubscribed = false) {
+  const promptText = isSubscribed
+    ? `Vil du afmelde abonnementet på "${name}"?\n\nKalenderen fjernes fra din oversigt.`
+    : `Slet kalenderen "${name}" permanent?\n\nAlle begivenheder i kalenderen slettes også på serveren. Dette kan ikke fortrydes.`;
+  const ok = window.confirm(promptText);
   if (ok) {
     await store.deleteCalendar(calId);
   }
@@ -147,35 +180,96 @@ function removeSingleClipboardEvent(evId: string) {
           </div>
         </div>
 
-        <!-- Formular: Ny kalender eller tilføj eksisterende CalDAV-link -->
+        <!-- Formular: Abonnér på kalender (Helligdage, Google, Microsoft, Apple) eller opret CalDAV-kalender -->
         <form
           v-if="showNewCalendarForm && !store.isPublicShareMode"
           class="mb-2.5 p-2.5 rounded-xl bg-slate-950 border border-blue-500/40 space-y-2"
           @submit.prevent="submitNewCalendar"
         >
-          <div class="text-[11px] font-semibold text-slate-200">Tilføj / Opret kalender</div>
-          <div class="flex items-center gap-2">
-            <input
-              v-model="newCalendarName"
-              type="text"
-              placeholder="Kalendernavn..."
-              class="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500"
-            />
-            <input
-              v-model="newCalendarColor"
-              type="color"
-              class="w-7 h-7 rounded-lg bg-transparent border border-slate-700 cursor-pointer shrink-0"
-              title="Vælg farve"
-            />
+          <!-- Fanevælger: Abonnér vs. Ny / CalDAV -->
+          <div class="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[10.5px] font-semibold">
+            <button
+              type="button"
+              class="py-1 px-1.5 rounded-md transition truncate"
+              :class="addCalendarMode === 'SUBSCRIBE' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'"
+              @click="addCalendarMode = 'SUBSCRIBE'"
+            >
+              Abonnér (.ics)
+            </button>
+            <button
+              type="button"
+              class="py-1 px-1.5 rounded-md transition truncate"
+              :class="addCalendarMode === 'CALDAV' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'"
+              @click="addCalendarMode = 'CALDAV'"
+            >
+              Ny / CalDAV
+            </button>
           </div>
-          <div>
-            <input
-              v-model="newCalendarUrl"
-              type="text"
-              placeholder="Valgfri SOGo CalDAV URL..."
-              class="w-full px-2.5 py-1.5 text-[11px] bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
-            />
-          </div>
+
+          <template v-if="addCalendarMode === 'SUBSCRIBE'">
+            <button
+              type="button"
+              :disabled="isCreatingCalendar"
+              class="w-full py-1.5 px-2 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-200 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition disabled:opacity-50"
+              @click="quickSubscribeDanishHolidays"
+            >
+              <span>🇩🇰 Tilføj Danske Helligdage (1-klik)</span>
+            </button>
+
+            <div class="text-[10px] text-slate-400 leading-tight pt-0.5">
+              Eller indsæt iCal / <code class="text-slate-300">.ics</code> / <code class="text-slate-300">webcal://</code> link fra Google, Microsoft Outlook eller Apple iCloud:
+            </div>
+
+            <div>
+              <input
+                v-model="newCalendarUrl"
+                type="text"
+                placeholder="https://... eller webcal://... (.ics)"
+                class="w-full px-2.5 py-1.5 text-[11px] bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div class="flex items-center gap-2">
+              <input
+                v-model="newCalendarName"
+                type="text"
+                placeholder="Valgfrit navn (hentes ellers automatisk)..."
+                class="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+              <input
+                v-model="newCalendarColor"
+                type="color"
+                class="w-7 h-7 rounded-lg bg-transparent border border-slate-700 cursor-pointer shrink-0"
+                title="Vælg farve"
+              />
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="flex items-center gap-2">
+              <input
+                v-model="newCalendarName"
+                type="text"
+                placeholder="Kalendernavn..."
+                class="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+              <input
+                v-model="newCalendarColor"
+                type="color"
+                class="w-7 h-7 rounded-lg bg-transparent border border-slate-700 cursor-pointer shrink-0"
+                title="Vælg farve"
+              />
+            </div>
+            <div>
+              <input
+                v-model="newCalendarUrl"
+                type="text"
+                placeholder="Valgfri CalDAV URL..."
+                class="w-full px-2.5 py-1.5 text-[11px] bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </template>
+
           <div class="flex items-center justify-end gap-1.5">
             <button
               type="button"
@@ -189,7 +283,15 @@ function removeSingleClipboardEvent(evId: string) {
               :disabled="isCreatingCalendar"
               class="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
             >
-              {{ isCreatingCalendar ? 'Gemmer...' : (newCalendarUrl ? 'Tilføj link' : 'Opret ny') }}
+              {{
+                isCreatingCalendar
+                  ? 'Henter...'
+                  : addCalendarMode === 'SUBSCRIBE'
+                    ? 'Abonnér'
+                    : newCalendarUrl
+                      ? 'Tilføj link'
+                      : 'Opret ny'
+              }}
             </button>
           </div>
         </form>
@@ -216,23 +318,34 @@ function removeSingleClipboardEvent(evId: string) {
                     {{ cal.name }}
                   </span>
                   <span
-                    v-if="cal.readOnly"
+                    v-if="cal.isSubscribed || cal.id.startsWith('sub::')"
+                    class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[9px] font-semibold shrink-0"
+                    title="Abonneret kalender (opdateres automatisk, skrivebeskyttet)"
+                  >
+                    <Rss class="w-2.5 h-2.5" />
+                  </span>
+                  <span
+                    v-else-if="cal.readOnly"
                     class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[9px] font-semibold shrink-0"
                     title="Skrivebeskyttet kalender (Read-Only)"
                   >
                     <Lock class="w-2.5 h-2.5" />
                   </span>
                 </div>
-                <div v-if="cal.isShared || cal.owner" class="text-[10px] text-slate-400 truncate">
+                <div v-if="cal.isSubscribed || cal.id.startsWith('sub::')" class="text-[10px] text-slate-400 truncate">
+                  {{ cal.owner || 'Kalender-abonnement' }}
+                </div>
+                <div v-else-if="cal.isShared || cal.owner" class="text-[10px] text-slate-400 truncate">
                   Delt af {{ cal.owner || 'ejer' }}
                 </div>
               </div>
             </label>
 
-            <!-- Handlinger: Del kalender, Slet, Skjul & Farvevælger -->
+            <!-- Handlinger: Del kalender, Slet/Afmeld, Skjul & Farvevælger -->
             <div class="flex items-center gap-0.5 shrink-0">
               <template v-if="!store.isPublicShareMode">
                 <button
+                  v-if="!cal.isSubscribed && !cal.id.startsWith('sub::')"
                   type="button"
                   class="p-1 rounded hover:bg-blue-500/20 text-slate-400 hover:text-blue-300 transition"
                   title="Del denne kalender via offentligt Read-Only link"
@@ -241,11 +354,11 @@ function removeSingleClipboardEvent(evId: string) {
                   <Share2 class="w-3 h-3" />
                 </button>
                 <button
-                  v-if="!cal.readOnly && !cal.isShared"
+                  v-if="(!cal.readOnly && !cal.isShared) || cal.isSubscribed || cal.id.startsWith('sub::')"
                   type="button"
                   class="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
-                  title="Slet kalender (inkl. alle begivenheder)"
-                  @click="confirmDeleteCalendar(cal.id, cal.name)"
+                  :title="cal.isSubscribed || cal.id.startsWith('sub::') ? 'Afmeld kalender-abonnement' : 'Slet kalender (inkl. alle begivenheder)'"
+                  @click="confirmDeleteCalendar(cal.id, cal.name, Boolean(cal.isSubscribed || cal.id.startsWith('sub::')))"
                 >
                   <Trash2 class="w-3 h-3" />
                 </button>

@@ -24,6 +24,8 @@ export interface CalendarSource {
   localColorOverride?: string | null;
   readOnly: boolean;      // Låser redigering, Drag & Drop og Ctrl+V hvis true
   isShared: boolean;      // Delt SOGo kalender
+  isSubscribed?: boolean; // Eksternt kalender-abonnement (.ics / webcal / Danske Helligdage)
+  subscriptionUrl?: string;
   owner?: string;
   visible: boolean;
   ctag?: string;

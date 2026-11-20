@@ -40,9 +40,10 @@ Traditionelle webkalendere kræver ofte utallige museklik og formularer, når ma
 * **Native Æ, Ø, Å:** Automatisk detektering og håndtering af både UTF-8 og ISO-8859-1 (Latin1/Windows-1252), så danske specialtegn altid vises korrekt i titler, lokationer, beskrivelser og iCal-data.
 * **Dansk brugerflade:** Formatering af datoer, klokkeslæt, ugestart (mandag) og tekster følger dansk standard (`da-DK`).
 
-### 💾 5. Import & Eksport (.ics)
-* **Import af iCalendar:** Importér nemt `.ics`-filer direkte ind i den ønskede kalender med automatisk tegnkodningshåndtering.
-* **Eksport til .ics:** Download enhver kalender som en standard `.ics`-fil til backup eller brug i andre programmer.
+### 💾 5. Kalender-Abonnementer (Helligdage, Google, Microsoft, Apple) & Import / Eksport (.ics)
+* **1-klik Danske Helligdage:** Tilføj alle officielle danske helligdage og mærkedage direkte via `+`-knappen i sidepanelet.
+* **Abonnér på eksterne kalendere (`.ics` / `webcal://`):** Abonnér på delte kalendere fra **Google Calendar**, **Microsoft Outlook / 365**, **Apple iCloud** m.fl. (inkl. automatisk udrulning af gentagne `RRULE`-begivenheder og synkronisering på tværs af enheder).
+* **Import & Eksport af iCalendar:** Importér `.ics`-filer direkte ind i en kalender eller download enhver kalender som `.ics`-backup.
 
 ### 🖱️ 6. Custom Højrekliksmenu
 * Højreklik på en begivenhed eller et datofelt for at åbne den integrerede kontekstmenu.
