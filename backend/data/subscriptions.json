@@ -1,0 +1,18 @@
+[
+  {
+    "id": "sub::dk-holidays",
+    "userKey": "https://test::u",
+    "name": "Danske Helligdage",
+    "subscriptionUrl": "builtin://dk-holidays",
+    "color": "#e11d48",
+    "createdAt": "2026-11-20T11:12:28.255Z"
+  },
+  {
+    "id": "sub::c7357666-0891-4b5e-b36e-259f0c6007ae",
+    "userKey": "https://test::u",
+    "name": "Denmark Holidays",
+    "subscriptionUrl": "https://www.officeholidays.com/ics-local-name/denmark",
+    "color": "#0891b2",
+    "createdAt": "2026-11-20T11:12:28.397Z"
+  }
+]
