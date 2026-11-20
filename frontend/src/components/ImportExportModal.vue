@@ -198,7 +198,7 @@ async function handleExport() {
               <Upload class="w-4 h-4" />
               {{
                 isImporting
-                  ? 'Importerer begivenheder til Mailcow...'
+                  ? 'Importerer begivenheder...'
                   : `Importér ${detectedEventCount > 0 ? detectedEventCount : ''} begivenhed(er)`
               }}
             </button>

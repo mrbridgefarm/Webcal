@@ -111,9 +111,12 @@ function formatShortDateTime(ev: CalendarEvent): string {
             </span>
             <span
               v-else
-              class="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+              class="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border transition-colors"
+              :class="store.isOnline
+                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                : 'bg-amber-500/15 text-amber-300 border-amber-500/30'"
             >
-              Mailcow Live
+              {{ store.isOnline ? 'Online' : 'Offline' }}
             </span>
           </div>
           <p class="text-[11px] text-slate-400 hidden sm:block">
@@ -396,7 +399,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
         v-if="!store.isPublicShareMode"
         type="button"
         class="p-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-rose-500/20 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 transition"
-        title="Log ud af Mailcow"
+        title="Log ud"
         @click="store.logout()"
       >
         <LogOut class="w-4 h-4" />

@@ -220,7 +220,7 @@ const safeVideoUrl = computed(() => {
           <!-- Kalender & Heldag -->
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
             <div class="sm:col-span-2">
-              <label class="block text-slate-400 font-medium mb-1">SOGo Kalender</label>
+              <label class="block text-slate-400 font-medium mb-1">Kalender</label>
               <select
                 v-model="calendarId"
                 :disabled="isReadOnly"

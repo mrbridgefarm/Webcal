@@ -150,12 +150,12 @@ function removeSingleClipboardEvent(evId: string) {
     class="bg-slate-900/90 flex flex-col justify-between p-3.5 select-none overflow-y-auto shrink-0 h-full"
     :style="{ width: `${props.width}px` }"
   >
-    <!-- Top: SOGo Kalendere -->
+    <!-- Top: Kalendere -->
     <div class="space-y-4">
       <div>
         <div class="flex items-center justify-between mb-2">
           <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400 truncate">
-            {{ store.isPublicShareMode ? 'Delte Kalendere' : 'SOGo Kalendere' }}
+            {{ store.isPublicShareMode ? 'Delte Kalendere' : 'Kalendere' }}
           </h2>
           <div class="flex items-center gap-1.5 shrink-0">
             <span class="text-[11px] text-slate-500">
@@ -374,7 +374,7 @@ function removeSingleClipboardEvent(evId: string) {
                 v-if="cal.localColorOverride && cal.localColorOverride !== cal.serverColor"
                 type="button"
                 class="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
-                title="Gendan SOGo serverfarve"
+                title="Gendan serverfarve"
                 @click="store.setCalendarColorOverride(cal.id, null)"
               >
                 <RotateCcw class="w-3 h-3" />

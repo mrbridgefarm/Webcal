@@ -401,10 +401,11 @@ export const useCalendarStore = defineStore('calendar', () => {
         connectedAt: new Date().toISOString()
       };
 
+      isOnline.value = true;
       await syncWithServer(false);
       isLoginModalOpen.value = false;
       startReminderWatcher(() => visibleEvents.value);
-      notify('Forbundet til Mailcow / SOGo', `Logget ind som ${loginRes.username}`, 'success');
+      notify('Forbundet til CalDAV-serveren', `Logget ind som ${loginRes.username}`, 'success');
     } finally {
       isSyncing.value = false;
     }
@@ -441,7 +442,8 @@ export const useCalendarStore = defineStore('calendar', () => {
       return;
     }
 
-    if (!isOnline.value) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      isOnline.value = false;
       if (!silent) {
         notify('Ingen internetforbindelse', 'Synkronisering venter til du er online igen.', 'warning');
       }
@@ -452,6 +454,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     try {
       await flushSyncQueue();
       const res = await apiSyncCalDav(undefined, loadLocalSubscriptions());
+      isOnline.value = true;
 
       const visibilityMap = new Map(calendars.value.map((c) => [c.id, c.visible]));
       const hiddenSet = new Set(hiddenCalendarIds.value);
@@ -516,11 +519,12 @@ export const useCalendarStore = defineStore('calendar', () => {
       }
 
       if (!silent) {
-        notify('Kalendere synkroniseret', `Hentede ${plainEvents.length} begivenheder fra Mailcow/SOGo.`, 'success');
+        notify('Kalendere synkroniseret', `Hentede ${plainEvents.length} begivenheder fra serveren.`, 'success');
       }
     } catch (err: any) {
+      isOnline.value = false;
       if (!silent) {
-        notify('Synkroniseringsfejl', err?.message || 'Kunne ikke kontakte CalDAV-proxy.', 'error');
+        notify('Synkroniseringsfejl', err?.message || 'Kunne ikke kontakte CalDAV-serveren.', 'error');
       }
     } finally {
       isSyncing.value = false;
