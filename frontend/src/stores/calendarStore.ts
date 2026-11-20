@@ -9,6 +9,7 @@ import {
   apiSyncCalDav,
   apiSaveEvent,
   apiDeleteEvent,
+  apiBulkDeleteEvents,
   apiUpdateRsvp,
   apiCreateCalendar,
   apiDeleteCalendar,
@@ -137,6 +138,7 @@ export const useCalendarStore = defineStore('calendar', () => {
   const preselectedShareCalendarId = ref<string>('');
   const isImportExportModalOpen = ref<boolean>(false);
   const preselectedImportExportCalendarId = ref<string>('');
+  const isBulkDeleteModalOpen = ref<boolean>(false);
   const editingEvent = ref<CalendarEvent | null>(null);
   const isEventModalOpen = ref<boolean>(false);
   const toasts = ref<ToastMessage[]>([]);
@@ -960,6 +962,91 @@ export const useCalendarStore = defineStore('calendar', () => {
     }
   }
 
+  /**
+   * Bulk-sletning af mange (f.eks. gamle) begivenheder i én samlet operation.
+   */
+  async function bulkDeleteEvents(ids: string[], moveToTrash = false): Promise<number> {
+    if (isPublicShareMode.value || ids.length === 0) return 0;
+    const targetIdSet = new Set(ids);
+    const toDelete = events.value.filter(
+      (e) => targetIdSet.has(e.id) && !isCalendarReadOnly(e.calendarId)
+    );
+    if (toDelete.length === 0) return 0;
+
+    const snapshots = toDelete.map((e) => clonePlain(e));
+    const deleteIdSet = new Set(snapshots.map((e) => e.id));
+
+    events.value = events.value.filter((e) => !deleteIdSet.has(e.id));
+    selectedEventIds.value = selectedEventIds.value.filter((id) => !deleteIdSet.has(id));
+
+    const now = new Date();
+    const expires = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const newTrashEntries: TrashItem[] = moveToTrash
+      ? snapshots.map((ev) => ({
+          id: ev.id,
+          event: clonePlain(ev),
+          deletedAt: now.toISOString(),
+          expiresAt: expires.toISOString()
+        }))
+      : [];
+
+    await db.transaction('rw', db.events, db.trash, async () => {
+      await db.events.bulkDelete([...deleteIdSet]);
+      if (moveToTrash && newTrashEntries.length > 0) {
+        await db.trash.bulkPut(newTrashEntries);
+      }
+    });
+
+    if (moveToTrash) {
+      trashItems.value = await db.trash.orderBy('deletedAt').reverse().toArray();
+    }
+
+    const remoteItems = snapshots
+      .filter((ev) => Boolean(ev.caldavUrl))
+      .map((ev) => ({
+        id: ev.id,
+        caldavUrl: ev.caldavUrl!,
+        etag: ev.etag
+      }));
+
+    if (remoteItems.length > 0) {
+      if (isOnline.value) {
+        try {
+          await apiBulkDeleteEvents(
+            remoteItems.map((item) => ({ caldavUrl: item.caldavUrl, etag: item.etag }))
+          );
+        } catch {
+          // Hvis samlet kald fejler, læg dem i offline-køen
+          for (const item of remoteItems) {
+            await enqueueSync({
+              action: 'DELETE',
+              eventId: item.id,
+              payload: { caldavUrl: item.caldavUrl, etag: item.etag }
+            });
+          }
+        }
+      } else {
+        for (const item of remoteItems) {
+          await enqueueSync({
+            action: 'DELETE',
+            eventId: item.id,
+            payload: { caldavUrl: item.caldavUrl, etag: item.etag }
+          });
+        }
+      }
+    }
+
+    notify(
+      `Slettede ${snapshots.length} gamle begivenheder`,
+      moveToTrash
+        ? 'Begivenhederne er flyttet til 30-dages papirkurven og fjernet fra serveren.'
+        : 'Begivenhederne er slettet permanent fra kalenderen og serveren.',
+      'success'
+    );
+
+    return snapshots.length;
+  }
+
   async function restoreFromTrash(trashId: string) {
     if (isPublicShareMode.value) return;
     const item = trashItems.value.find((t) => t.id === trashId);
@@ -1694,6 +1781,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     preselectedShareCalendarId,
     isImportExportModalOpen,
     preselectedImportExportCalendarId,
+    isBulkDeleteModalOpen,
     editingEvent,
     isEventModalOpen,
     toasts,
@@ -1730,6 +1818,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     setCalendarColorOverride,
     saveEvent,
     deleteEventsByIds,
+    bulkDeleteEvents,
     restoreFromTrash,
     permanentlyDeleteFromTrash,
     emptyTrash,

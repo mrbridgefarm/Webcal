@@ -338,6 +338,50 @@ caldavRouter.delete('/events', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/caldav/events/bulk-delete
+ * Sletter mange (f.eks. gamle) begivenheder på én gang i kontrollerede parallelle batches.
+ */
+caldavRouter.post('/events/bulk-delete', async (req: Request, res: Response) => {
+  try {
+    const creds = extractCredentials(req);
+    const items = Array.isArray(req.body?.items)
+      ? (req.body.items as Array<{ caldavUrl?: string; etag?: string }>)
+      : [];
+
+    const validItems = items.filter((item) => typeof item?.caldavUrl === 'string' && item.caldavUrl.trim().length > 0);
+    let deletedCount = 0;
+    let failedCount = 0;
+    const CONCURRENCY = 8;
+
+    for (let i = 0; i < validItems.length; i += CONCURRENCY) {
+      const batch = validItems.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(
+        batch.map((item) => deleteCalDavEvent(creds, item.caldavUrl!.trim(), item.etag))
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          deletedCount++;
+        } else {
+          failedCount++;
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      deletedCount,
+      failedCount
+    });
+  } catch (err: any) {
+    console.error('Fejl ved bulk-sletning af CalDAV events:', err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Kunne ikke gennemføre bulk-sletning på CalDAV-serveren.'
+    });
+  }
+});
+
+/**
  * POST /api/caldav/calendars
  * Opretter en ny kalender på Mailcow/SOGo (MKCALENDAR) eller tilføjer et eksisterende kalenderlink.
  */

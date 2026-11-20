@@ -9,6 +9,7 @@ import TrashModal from './components/TrashModal.vue';
 import LoginModal from './components/LoginModal.vue';
 import ShareModal from './components/ShareModal.vue';
 import ImportExportModal from './components/ImportExportModal.vue';
+import BulkDeleteModal from './components/BulkDeleteModal.vue';
 import { useCalendarStore } from './stores/calendarStore';
 import {
   X,
@@ -199,6 +200,7 @@ onUnmounted(() => {
       <TrashModal />
       <ShareModal />
       <ImportExportModal />
+      <BulkDeleteModal />
     </template>
 
     <!-- LoginModal (krævet før man kan se noget, medmindre man åbner et offentligt delingslink) -->

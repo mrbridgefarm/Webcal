@@ -139,6 +139,25 @@ export async function apiDeleteEvent(caldavUrl: string, etag?: string): Promise<
   }
 }
 
+export async function apiBulkDeleteEvents(
+  items: Array<{ caldavUrl: string; etag?: string }>
+): Promise<{ deletedCount: number; failedCount: number }> {
+  const res = await fetch('/api/caldav/events/bulk-delete', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ items })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Kunne ikke gennemføre bulk-sletning på serveren.');
+  }
+  return {
+    deletedCount: data.deletedCount || 0,
+    failedCount: data.failedCount || 0
+  };
+}
+
 export async function apiUpdateRsvp(
   event: CalendarEvent,
   partstat: RsvpStatus

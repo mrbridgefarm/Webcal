@@ -583,19 +583,32 @@ function removeSingleClipboardEvent(evId: string) {
         </button>
       </div>
 
-      <button
-        type="button"
-        class="w-full flex items-center justify-between px-2.5 py-2 rounded-xl bg-slate-800/70 hover:bg-slate-800 border border-slate-700/70 text-xs text-slate-200 transition"
-        @click="store.isTrashModalOpen = true"
-      >
-        <span class="flex items-center gap-1.5 font-medium truncate">
-          <Trash2 class="w-3.5 h-3.5 text-rose-400 shrink-0" />
-          <span class="truncate">Papirkurv (30d)</span>
-        </span>
-        <span class="px-1.5 py-0.5 rounded-full bg-slate-900 text-slate-300 text-[10px] font-semibold shrink-0">
-          {{ store.trashItems.length }}
-        </span>
-      </button>
+      <div class="grid grid-cols-2 gap-1.5">
+        <button
+          type="button"
+          class="flex items-center justify-between px-2 py-2 rounded-xl bg-slate-800/70 hover:bg-slate-800 border border-slate-700/70 text-xs text-slate-200 transition"
+          title="Åbn 30-dages papirkurv"
+          @click="store.isTrashModalOpen = true"
+        >
+          <span class="flex items-center gap-1.5 font-medium truncate">
+            <Trash2 class="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span class="truncate">Papirkurv</span>
+          </span>
+          <span class="px-1.5 py-0.5 rounded-full bg-slate-900 text-slate-300 text-[10px] font-semibold shrink-0">
+            {{ store.trashItems.length }}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          class="flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-xs text-rose-300 font-semibold transition"
+          title="Bulk-oprydning: Find og slet gamle begivenheder før en valgt dato"
+          @click="store.isBulkDeleteModalOpen = true"
+        >
+          <Trash2 class="w-3.5 h-3.5 shrink-0" />
+          <span class="truncate">Slet gamle</span>
+        </button>
+      </div>
 
       <button
         v-if="notifPermission !== 'granted'"

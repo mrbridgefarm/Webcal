@@ -53,9 +53,10 @@ Traditionelle webkalendere kræver ofte utallige museklik og formularer, når ma
 * **Spam-beskyttelse ved møder:** Hvis en begivenhed indeholder inviterede gæster (`ATTENDEE`), spærres `Ctrl+C` automatisk, så du ikke ved en fejl kommer til at duplikere mødeinvitationer til eksterne deltagere.
 * **Intelligent Read-Only lås:** Delte kalendere uden skriverettigheder markeres med `🔒 Read-Only` og beskyttes automatisk mod utilsigtede ændringer, sletning og `Ctrl+V`.
 
-### ↶ 8. Lokal Fortryd (`Ctrl+Z` i 30 sek.) & 30-dages Papirkurv
+### ↶ 8. Lokal Fortryd (`Ctrl+Z` i 30 sek.), 30-dages Papirkurv & Bulk-Oprydning
 * **Fortryd med automatisk udløb:** Handlinger kan fortrydes med `Ctrl+Z` eller via knappen i topbaren i op til **30 sekunder** efter handlingen, hvorefter historikken automatisk ryddes for at spare hukommelse.
 * **30-dages lokal papirkurv:** Slettede aftaler gemmes lokalt i 30 dage med dagsnedtælling og kan gendannes med ét klik.
+* **Bulk-oprydning i gamle begivenheder (`Slet gamle`):** Find og slet gamle begivenheder før en valgt skæringsdato (f.eks. ældre end 1, 3, 6 eller 12 måneder) med forhåndsvisning, valgfrit tekstfilter og mulighed for at fravælge enkelte aftaler før sletning.
 
 ### 🔗 9. Del Kalender med 3. Part (Offentligt Link uden login)
 * **Deling via token:** Generér et sikkert delingslink (`?share=<token>`), som giver 3. part direkte adgang til at se kalenderen uden krav om brugernavn eller adgangskode.
