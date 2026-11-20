@@ -172,7 +172,7 @@ async function handleUndo() {
           >
             <span class="flex items-center gap-2">
               <Copy class="w-3.5 h-3.5 text-emerald-400" />
-              Kopiér dagens vagter
+              Kopiér begivenhed
             </span>
             <kbd class="text-[10px] text-slate-400">Ctrl+C</kbd>
           </button>

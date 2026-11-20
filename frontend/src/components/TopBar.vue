@@ -316,7 +316,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
           </div>
 
           <div class="grid grid-cols-2 gap-y-2 text-[11px] text-slate-300">
-            <span>Kopiér vagt / dag:</span>
+            <span>Kopiér begivenhed:</span>
             <kbd class="justify-self-end px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-100 rounded text-[10px] font-semibold">Ctrl + C</kbd>
             <span>Klip begivenhed:</span>
             <kbd class="justify-self-end px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-100 rounded text-[10px] font-semibold">Ctrl + X</kbd>
