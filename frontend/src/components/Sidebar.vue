@@ -213,7 +213,12 @@ function removeSingleClipboardEvent(evId: string) {
               class="w-full py-1.5 px-2 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-200 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition disabled:opacity-50"
               @click="quickSubscribeDanishHolidays"
             >
-              <span>🇩🇰 Tilføj Danske Helligdage (1-klik)</span>
+              <svg class="w-4 h-3 rounded-[2px] shrink-0 shadow-sm" viewBox="0 0 28 20" xmlns="http://www.w3.org/2000/svg">
+                <rect width="28" height="20" fill="#c8102e" />
+                <rect x="8" y="0" width="3.5" height="20" fill="#ffffff" />
+                <rect x="0" y="8.25" width="28" height="3.5" fill="#ffffff" />
+              </svg>
+              <span>Tilføj Danske Helligdage (1-klik)</span>
             </button>
 
             <div class="text-[10px] text-slate-400 leading-tight pt-0.5">

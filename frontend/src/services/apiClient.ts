@@ -88,14 +88,22 @@ export async function apiLogoutCalDav(): Promise<void> {
   }).catch(() => {});
 }
 
+export interface LocalSubscriptionHint {
+  id?: string;
+  name?: string;
+  subscriptionUrl: string;
+  color?: string;
+}
+
 export async function apiSyncCalDav(
-  timeRange?: { start: string; end: string }
+  timeRange?: { start: string; end: string },
+  subscriptions?: LocalSubscriptionHint[]
 ): Promise<SyncResponse> {
   const res = await fetch('/api/caldav/sync', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ timeRange })
+    body: JSON.stringify({ timeRange, subscriptions })
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -271,6 +279,8 @@ export async function apiSubscribeCalendar(params: {
   name?: string;
   subscriptionUrl: string;
   color?: string;
+  username?: string;
+  serverUrl?: string;
 }): Promise<{ calendar: Omit<CalendarSource, 'visible'>; events: CalendarEvent[] }> {
   const res = await fetch('/api/caldav/subscriptions', {
     method: 'POST',
@@ -278,7 +288,13 @@ export async function apiSubscribeCalendar(params: {
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
     body: JSON.stringify(params)
   });
-  const data = await res.json();
+  const text = await res.text();
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error('Serveren understøtter endnu ikke abonnement-endpointet. Opdatér venligst Docker-containeren (docker compose pull && docker compose up -d).');
+  }
   if (!res.ok || !data.ok) {
     throw new Error(data.error || 'Kunne ikke abonnere på kalenderen.');
   }
@@ -288,14 +304,20 @@ export async function apiSubscribeCalendar(params: {
   };
 }
 
-export async function apiUnsubscribeCalendar(id: string): Promise<void> {
+export async function apiUnsubscribeCalendar(id: string, username?: string, serverUrl?: string): Promise<void> {
   const res = await fetch('/api/caldav/subscriptions', {
     method: 'DELETE',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ id })
+    body: JSON.stringify({ id, username, serverUrl })
   });
-  const data = await res.json();
+  const text = await res.text();
+  let data: any = { ok: res.ok };
+  try {
+    data = JSON.parse(text);
+  } catch {
+    // Ignorér ikke-JSON ved afmelding
+  }
   if (!res.ok || !data.ok) {
     throw new Error(data.error || 'Kunne ikke afmelde kalender-abonnementet.');
   }

@@ -19,7 +19,8 @@ import {
   apiImportIcs,
   apiExportIcs,
   apiSubscribeCalendar,
-  apiUnsubscribeCalendar
+  apiUnsubscribeCalendar,
+  type LocalSubscriptionHint
 } from '../services/apiClient';
 import { startReminderWatcher } from '../services/notifications';
 import type {
@@ -448,20 +449,33 @@ export const useCalendarStore = defineStore('calendar', () => {
     isSyncing.value = true;
     try {
       await flushSyncQueue();
-      const res = await apiSyncCalDav();
+      const res = await apiSyncCalDav(undefined, loadLocalSubscriptions());
 
       const visibilityMap = new Map(calendars.value.map((c) => [c.id, c.visible]));
       const hiddenSet = new Set(hiddenCalendarIds.value);
-      const mergedCalendars: CalendarSource[] = clonePlain(
-        res.calendars
+      const serverCalIds = new Set(res.calendars.map((c) => c.id));
+      const localSubCalendars = calendars.value
+        .filter((c) => (c.isSubscribed || c.id.startsWith('sub::')) && !serverCalIds.has(c.id) && !hiddenSet.has(c.id))
+        .map((c) => clonePlain(c));
+
+      const mergedCalendars: CalendarSource[] = clonePlain([
+        ...res.calendars
           .filter((c) => !hiddenSet.has(c.id))
           .map((c) => ({
             ...c,
             visible: visibilityMap.has(c.id) ? Boolean(visibilityMap.get(c.id)) : true
-          }))
-      );
+          })),
+        ...localSubCalendars
+      ]);
       applyColorOverridesToCalendars(mergedCalendars);
-      const serverEvents = clonePlain(res.events).filter((e) => !hiddenSet.has(e.calendarId));
+      const localSubCalIds = new Set(localSubCalendars.map((c) => c.id));
+      const preservedSubEvents = events.value
+        .filter((e) => localSubCalIds.has(e.calendarId))
+        .map((e) => clonePlain(e));
+      const serverEvents = [
+        ...clonePlain(res.events).filter((e) => !hiddenSet.has(e.calendarId)),
+        ...preservedSubEvents
+      ];
 
       const pendingQueue = await db.syncQueue.toArray();
       const pendingIds = new Set(
@@ -1294,6 +1308,121 @@ export const useCalendarStore = defineStore('calendar', () => {
     return newCal;
   }
 
+  const SUBSCRIPTIONS_STORAGE_KEY = 'dav_sync_cal_subscriptions_v1';
+
+  function loadLocalSubscriptions(): LocalSubscriptionHint[] {
+    try {
+      const raw = localStorage.getItem(SUBSCRIPTIONS_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveLocalSubscription(hint: LocalSubscriptionHint) {
+    const list = loadLocalSubscriptions().filter(
+      (item) =>
+        item.id !== hint.id &&
+        item.subscriptionUrl.toLowerCase() !== hint.subscriptionUrl.toLowerCase()
+    );
+    list.push(hint);
+    localStorage.setItem(SUBSCRIPTIONS_STORAGE_KEY, JSON.stringify(list));
+  }
+
+  function removeLocalSubscription(id: string, url?: string) {
+    const list = loadLocalSubscriptions().filter(
+      (item) =>
+        item.id !== id &&
+        (!url || item.subscriptionUrl.toLowerCase() !== url.toLowerCase())
+    );
+    localStorage.setItem(SUBSCRIPTIONS_STORAGE_KEY, JSON.stringify(list));
+  }
+
+  function buildClientDanishHolidays(calendarId: string): CalendarEvent[] {
+    const currentYear = new Date().getFullYear();
+    const result: CalendarEvent[] = [];
+
+    const getEaster = (year: number): Date => {
+      const a = year % 19;
+      const b = Math.floor(year / 100);
+      const c = year % 100;
+      const d = Math.floor(b / 4);
+      const e = b % 4;
+      const f = Math.floor((b + 8) / 25);
+      const g = Math.floor((b - f + 1) / 3);
+      const h = (19 * a + b - d - g + 15) % 30;
+      const i = Math.floor(c / 4);
+      const k = c % 4;
+      const l = (32 + 2 * e + 2 * i - h - k) % 7;
+      const m = Math.floor((a + 11 * h + 22 * l) / 451);
+      const month = Math.floor((h + l - 7 * m + 114) / 31);
+      const day = ((h + l - 7 * m + 114) % 31) + 1;
+      return new Date(year, month - 1, day);
+    };
+
+    const addD = (base: Date, days: number): Date => {
+      const dt = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+      dt.setDate(dt.getDate() + days);
+      return dt;
+    };
+
+    const lastSun = (year: number, monthIdx: number): Date => {
+      const dt = new Date(year, monthIdx + 1, 0);
+      dt.setDate(dt.getDate() - dt.getDay());
+      return dt;
+    };
+
+    for (let year = currentYear - 1; year <= currentYear + 3; year++) {
+      const easter = getEaster(year);
+      const items: Array<{ date: Date; title: string; description: string }> = [
+        { date: new Date(year, 0, 1), title: 'Nytårsdag', description: 'Officiel dansk helligdag' },
+        { date: addD(easter, -49), title: 'Fastelavn', description: 'Dansk mærkedag' },
+        { date: addD(easter, -7), title: 'Palmesøndag', description: 'Officiel dansk helligdag' },
+        { date: addD(easter, -3), title: 'Skærtorsdag', description: 'Officiel dansk helligdag' },
+        { date: addD(easter, -2), title: 'Langfredag', description: 'Officiel dansk helligdag' },
+        { date: easter, title: 'Påskedag', description: 'Officiel dansk helligdag' },
+        { date: addD(easter, 1), title: '2. Påskedag', description: 'Officiel dansk helligdag' },
+        { date: new Date(year, 4, 1), title: '1. Maj', description: 'Arbejdernes internationale kampdag' },
+        { date: addD(easter, 39), title: 'Kristi Himmelfartsdag', description: 'Officiel dansk helligdag' },
+        { date: addD(easter, 49), title: 'Pinsedag', description: 'Officiel dansk helligdag' },
+        { date: addD(easter, 50), title: '2. Pinsedag', description: 'Officiel dansk helligdag' },
+        { date: new Date(year, 5, 5), title: 'Grundlovsdag', description: 'Dansk national mærkedag (5. juni)' },
+        { date: new Date(year, 5, 23), title: 'Sankt Hans Aften', description: 'Dansk mærkedag (23. juni)' },
+        { date: lastSun(year, 2), title: 'Sommertid starter (+1 time)', description: 'Urene stilles 1 time frem' },
+        { date: lastSun(year, 9), title: 'Vintertid starter (-1 time)', description: 'Urene stilles 1 time tilbage' },
+        { date: new Date(year, 10, 10), title: 'Mortensaften', description: 'Dansk mærkedag (10. november)' },
+        { date: new Date(year, 11, 24), title: 'Juleaften', description: 'Dansk mærkedag (24. december)' },
+        { date: new Date(year, 11, 25), title: 'Juledag', description: 'Officiel dansk helligdag' },
+        { date: new Date(year, 11, 26), title: '2. Juledag', description: 'Officiel dansk helligdag' },
+        { date: new Date(year, 11, 31), title: 'Nytårsaften', description: 'Dansk mærkedag (31. december)' }
+      ];
+
+      for (const h of items) {
+        const startYmd = toDateOnlyString(h.date);
+        const endYmd = toDateOnlyString(addD(h.date, 1));
+        const slug = h.title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const uid = `dk-holiday-${year}-${slug}`;
+        result.push({
+          id: `${calendarId}::${uid}`,
+          uid,
+          calendarId,
+          title: h.title,
+          start: startYmd,
+          end: endYmd,
+          allDay: true,
+          description: h.description,
+          location: 'Danmark',
+          timezone: 'Europe/Copenhagen',
+          attendees: [],
+          reminderMinutes: null
+        });
+      }
+    }
+    return result;
+  }
+
   async function subscribeToCalendar(subscriptionUrl: string, name?: string, color?: string) {
     if (isPublicShareMode.value || session.value?.mode !== 'CALDAV') return null;
     const trimmedUrl = subscriptionUrl.trim();
@@ -1302,27 +1431,72 @@ export const useCalendarStore = defineStore('calendar', () => {
       return null;
     }
 
-    if (!isOnline.value) {
-      notify('Offline', 'Du skal være online for at abonnere på en kalender.', 'warning');
+    const isBuiltinDk = trimmedUrl === 'builtin://dk-holidays' || trimmedUrl.toLowerCase() === 'dk-holidays';
+
+    if (!isBuiltinDk && !isOnline.value) {
+      notify('Offline', 'Du skal være online for at abonnere på en ekstern kalender.', 'warning');
       return null;
     }
 
     try {
-      const result = await apiSubscribeCalendar({
-        name: name?.trim() || undefined,
-        subscriptionUrl: trimmedUrl,
-        color
-      });
+      let calObj: Omit<CalendarSource, 'visible'>;
+      let fetchedEvents: CalendarEvent[];
+
+      if (isBuiltinDk) {
+        const id = 'sub::dk-holidays';
+        const resolvedColor = color || '#e11d48';
+        calObj = {
+          id,
+          url: 'builtin://dk-holidays',
+          subscriptionUrl: 'builtin://dk-holidays',
+          name: name?.trim() || 'Danske Helligdage',
+          color: resolvedColor,
+          serverColor: resolvedColor,
+          readOnly: true,
+          isShared: false,
+          isSubscribed: true,
+          owner: 'Indbygget abonnement',
+          description: 'Officielle danske helligdage og mærkedage'
+        };
+        fetchedEvents = buildClientDanishHolidays(id);
+        // Gem også på backend i baggrunden hvis online
+        if (isOnline.value) {
+          void apiSubscribeCalendar({
+            name: calObj.name,
+            subscriptionUrl: 'builtin://dk-holidays',
+            color: resolvedColor,
+            username: session.value?.username,
+            serverUrl: session.value?.serverUrl
+          }).catch(() => {});
+        }
+      } else {
+        const result = await apiSubscribeCalendar({
+          name: name?.trim() || undefined,
+          subscriptionUrl: trimmedUrl,
+          color,
+          username: session.value?.username,
+          serverUrl: session.value?.serverUrl
+        });
+        calObj = result.calendar;
+        fetchedEvents = result.events || [];
+      }
 
       const overrides = loadColorOverrides();
-      const localColor = overrides[result.calendar.id] || null;
+      const localColor = overrides[calObj.id] || null;
       const newCal: CalendarSource = clonePlain({
-        ...result.calendar,
-        color: localColor || result.calendar.color,
+        ...calObj,
+        color: localColor || calObj.color,
         localColorOverride: localColor,
         visible: true,
         isSubscribed: true,
         readOnly: true
+      });
+
+      saveLocalSubscription({
+        id: newCal.id,
+        name: newCal.name,
+        subscriptionUrl: newCal.subscriptionUrl || newCal.url,
+        color: newCal.color
       });
 
       hiddenCalendarIds.value = hiddenCalendarIds.value.filter((id) => id !== newCal.id);
@@ -1335,9 +1509,8 @@ export const useCalendarStore = defineStore('calendar', () => {
         calendars.value.push(newCal);
       }
 
-      // Opdater begivenheder for dette abonnement
       const otherEvents = events.value.filter((e) => e.calendarId !== newCal.id);
-      const subEvents = clonePlain(result.events || []);
+      const subEvents = clonePlain(fetchedEvents);
       events.value = [...otherEvents, ...subEvents];
 
       await db.transaction('rw', db.calendars, db.events, async () => {
@@ -1369,11 +1542,9 @@ export const useCalendarStore = defineStore('calendar', () => {
     if (!cal) return;
 
     if (cal.isSubscribed || cal.id.startsWith('sub::')) {
-      try {
-        await apiUnsubscribeCalendar(cal.id);
-      } catch (err: any) {
-        notify('Kunne ikke afmelde abonnement', err?.message || String(err), 'error', 9000);
-        return;
+      removeLocalSubscription(cal.id, cal.subscriptionUrl || cal.url);
+      if (isOnline.value) {
+        await apiUnsubscribeCalendar(cal.id, session.value?.username, session.value?.serverUrl).catch(() => {});
       }
       await removeCalendarLocally(calId);
       notify('Abonnement afmeldt', `"${cal.name}" er fjernet fra dine kalendere.`, 'info');

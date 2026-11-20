@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { CalDavCredentials, CalendarInfoDTO } from './davClient.js';
@@ -13,8 +14,8 @@ export interface SubscriptionRecord {
   createdAt: string;
 }
 
-const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
-const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
+const PREFERRED_DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
+const FALLBACK_DATA_DIR = path.join(os.tmpdir(), 'dav-sync-data');
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_ICS_BYTES = 8 * 1024 * 1024;
 
@@ -25,11 +26,31 @@ interface FeedCacheEntry {
 }
 
 const feedCache = new Map<string, FeedCacheEntry>();
+let memorySubscriptions: SubscriptionRecord[] | null = null;
+let resolvedDataDir: string | null = null;
 
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+function getWritableDataDir(): string {
+  if (resolvedDataDir) return resolvedDataDir;
+  for (const dir of [PREFERRED_DATA_DIR, FALLBACK_DATA_DIR]) {
+    try {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const probe = path.join(dir, '.write_probe');
+      fs.writeFileSync(probe, 'ok', { mode: 0o600 });
+      fs.unlinkSync(probe);
+      resolvedDataDir = dir;
+      return dir;
+    } catch {
+      // Prøv næste mappe (f.eks. hvis /app/data i Docker-volume ejes af root)
+    }
   }
+  resolvedDataDir = FALLBACK_DATA_DIR;
+  return resolvedDataDir;
+}
+
+function getSubscriptionsFilePath(): string {
+  return path.join(getWritableDataDir(), 'subscriptions.json');
 }
 
 function getUserKey(creds: CalDavCredentials): string {
@@ -37,22 +58,36 @@ function getUserKey(creds: CalDavCredentials): string {
 }
 
 function readAllSubscriptions(): SubscriptionRecord[] {
-  ensureDataDir();
-  if (!fs.existsSync(SUBSCRIPTIONS_FILE)) {
-    return [];
+  if (memorySubscriptions !== null) {
+    return [...memorySubscriptions];
   }
-  try {
-    const raw = fs.readFileSync(SUBSCRIPTIONS_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+  for (const dir of [getWritableDataDir(), PREFERRED_DATA_DIR, FALLBACK_DATA_DIR]) {
+    const file = path.join(dir, 'subscriptions.json');
+    try {
+      if (fs.existsSync(file)) {
+        const raw = fs.readFileSync(file, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          memorySubscriptions = parsed;
+          return [...memorySubscriptions];
+        }
+      }
+    } catch {
+      // Ignorér læsefejl og fald tilbage til hukommelse
+    }
   }
+  memorySubscriptions = [];
+  return [];
 }
 
 function writeAllSubscriptions(records: SubscriptionRecord[]) {
-  ensureDataDir();
-  fs.writeFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(records, null, 2), { mode: 0o600 });
+  memorySubscriptions = [...records];
+  try {
+    const file = getSubscriptionsFilePath();
+    fs.writeFileSync(file, JSON.stringify(records, null, 2), { mode: 0o600 });
+  } catch (err) {
+    console.warn('Kunne ikke skrive subscriptions.json til disk (bevares i hukommelse):', err);
+  }
 }
 
 export function normalizeSubscriptionUrl(rawUrl: string): string {
@@ -60,13 +95,20 @@ export function normalizeSubscriptionUrl(rawUrl: string): string {
   if (trimmed === 'builtin://dk-holidays' || trimmed.toLowerCase() === 'dk-holidays') {
     return 'builtin://dk-holidays';
   }
-  if (/^webcals?:\/\//i.test(trimmed)) {
-    return trimmed.replace(/^webcals?:\/\//i, 'https://');
+  let urlStr = trimmed;
+  if (/^webcals?:\/\//i.test(urlStr)) {
+    urlStr = urlStr.replace(/^webcals?:\/\//i, 'https://');
+  } else if (!/^https?:\/\//i.test(urlStr)) {
+    urlStr = `https://${urlStr}`;
   }
-  if (!/^https?:\/\//i.test(trimmed)) {
-    return `https://${trimmed}`;
+
+  // Konvertér automatisk officeholidays.com landesider til deres tilsvarende iCal-feed
+  const officeMatch = urlStr.match(/^https?:\/\/(?:www\.)?officeholidays\.com\/countries\/([a-z0-9_-]+)(?:\/\d{4})?\/?$/i);
+  if (officeMatch && officeMatch[1]) {
+    return `https://www.officeholidays.com/ics-local-name/${officeMatch[1].toLowerCase()}`;
   }
-  return trimmed;
+
+  return urlStr;
 }
 
 /**
@@ -140,9 +182,6 @@ function getEasterSunday(year: number): Date {
   return new Date(year, month - 1, day);
 }
 
-/**
- * Finder sidste søndag i en given måned (0-indekseret, f.eks. 2 = marts, 9 = oktober).
- */
 function getLastSundayOfMonth(year: number, monthIndex: number): Date {
   const lastDay = new Date(year, monthIndex + 1, 0);
   const dayOfWeek = lastDay.getDay();
@@ -167,7 +206,7 @@ export function generateDanishHolidayEvents(calendarId: string): CalendarEventDT
       { date: addDays(easter, -2), title: 'Langfredag', description: 'Officiel dansk helligdag' },
       { date: easter, title: 'Påskedag', description: 'Officiel dansk helligdag' },
       { date: addDays(easter, 1), title: '2. Påskedag', description: 'Officiel dansk helligdag' },
-      { date: new Date(year, 4, 1), title: '1. Maj (Arbejdernes kampdag)', description: 'Dansk mærkedag' },
+      { date: new Date(year, 4, 1), title: '1. Maj', description: 'Arbejdernes internationale kampdag' },
       { date: addDays(easter, 39), title: 'Kristi Himmelfartsdag', description: 'Officiel dansk helligdag' },
       { date: addDays(easter, 49), title: 'Pinsedag', description: 'Officiel dansk helligdag' },
       { date: addDays(easter, 50), title: '2. Pinsedag', description: 'Officiel dansk helligdag' },
@@ -191,7 +230,7 @@ export function generateDanishHolidayEvents(calendarId: string): CalendarEventDT
         id: `${calendarId}::${uid}`,
         uid,
         calendarId,
-        title: `🇩🇰 ${h.title}`,
+        title: h.title,
         start: startYmd,
         end: endYmd,
         allDay: true,
@@ -230,6 +269,57 @@ function extractIcsCalendarName(rawIcs: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Udtrækker et .ics / webcal:// link fra en HTML-side, hvis brugeren kom til at indsætte selve websiden.
+ */
+function discoverIcsUrlFromHtml(html: string, baseUrl: URL): string | null {
+  const webcalMatch = html.match(/webcals?:\/\/[^"'\s<>]+/i);
+  if (webcalMatch) {
+    return normalizeSubscriptionUrl(webcalMatch[0]);
+  }
+  const hrefMatch = html.match(/href=["']([^"']+(?:\.ics|\/ics-local-name\/[^"']+|\/ics\/[^"']+))["']/i);
+  if (hrefMatch && hrefMatch[1]) {
+    try {
+      return new URL(hrefMatch[1], baseUrl).toString();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function fetchUrlWithSafeRedirects(startUrl: URL): Promise<{ res: Response; finalUrl: URL }> {
+  let currentUrlObj = startUrl;
+  let res: Response | null = null;
+
+  for (let hop = 0; hop < 5; hop++) {
+    res = await fetch(currentUrlObj.toString(), {
+      method: 'GET',
+      redirect: 'manual',
+      headers: {
+        Accept: 'text/calendar, application/ics, text/plain, */*',
+        'User-Agent': 'Mozilla/5.0 (compatible; DAV-Sync-Cal/1.0)'
+      },
+      signal: AbortSignal.timeout(15000)
+    });
+
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location');
+      if (!location) break;
+      const redirectedUrl = new URL(location, currentUrlObj).toString();
+      currentUrlObj = assertSafeExternalFeedUrl(redirectedUrl);
+      continue;
+    }
+    break;
+  }
+
+  if (!res || !res.ok) {
+    throw new Error(`Kunne ikke hente kalender-feed (HTTP ${res?.status || 'ukendt'}). Kontrollér at linket er tilgængeligt.`);
+  }
+
+  return { res, finalUrl: currentUrlObj };
+}
+
 async function fetchExternalIcsFeed(
   subscriptionId: string,
   rawUrl: string,
@@ -250,41 +340,26 @@ async function fetchExternalIcsFeed(
     return { calendarName: cached.calendarName, events: cached.events };
   }
 
-  let currentUrlObj = assertSafeExternalFeedUrl(normalizedUrl);
-  let res: Response | null = null;
+  const initialUrlObj = assertSafeExternalFeedUrl(normalizedUrl);
+  const { res, finalUrl } = await fetchUrlWithSafeRedirects(initialUrlObj);
+  let rawText = await decodeFeedBytes(res);
 
-  for (let hop = 0; hop < 4; hop++) {
-    res = await fetch(currentUrlObj.toString(), {
-      method: 'GET',
-      redirect: 'manual',
-      headers: {
-        Accept: 'text/calendar, text/plain, */*',
-        'User-Agent': 'DAV-Sync-Cal/1.0'
-      },
-      signal: AbortSignal.timeout(15000)
-    });
-
-    if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get('location');
-      if (!location) break;
-      const redirectedUrl = new URL(location, currentUrlObj).toString();
-      currentUrlObj = assertSafeExternalFeedUrl(redirectedUrl);
-      continue;
+  // Hvis URL'en returnerede en HTML-side i stedet for en .ics-fil, prøv at finde .ics-linket i HTML'en
+  if (!rawText.includes('BEGIN:VCALENDAR')) {
+    const discovered = discoverIcsUrlFromHtml(rawText, finalUrl);
+    if (discovered) {
+      const discoveredUrlObj = assertSafeExternalFeedUrl(discovered);
+      const second = await fetchUrlWithSafeRedirects(discoveredUrlObj);
+      rawText = await decodeFeedBytes(second.res);
     }
-    break;
   }
 
-  if (!res || !res.ok) {
-    throw new Error(`Kunne ikke hente kalender-feed (HTTP ${res?.status || 'ukendt'}). Kontrollér at linket er et offentligt iCal (.ics) link.`);
+  if (!rawText.includes('BEGIN:VCALENDAR')) {
+    throw new Error('Linket returnerede en HTML-webside i stedet for en iCalendar (.ics) fil. Kontrollér at du bruger kalenderens direkte iCal / .ics link.');
   }
 
-  const rawIcs = await decodeFeedBytes(res);
-  if (!rawIcs.includes('BEGIN:VCALENDAR')) {
-    throw new Error('Linket returnerede ikke en gyldig iCalendar (.ics) fil. Brug kalenderens offentlige iCal / .ics adresse.');
-  }
-
-  const calendarName = extractIcsCalendarName(rawIcs);
-  const events = parseIcsToEvents(rawIcs, subscriptionId, undefined, undefined, false);
+  const calendarName = extractIcsCalendarName(rawText);
+  const events = parseIcsToEvents(rawText, subscriptionId, undefined, undefined, false);
 
   feedCache.set(cacheKey, {
     fetchedAt: Date.now(),
@@ -323,6 +398,9 @@ export async function addUserSubscription(
     (item) => item.userKey === userKey && item.subscriptionUrl.toLowerCase() === normalizedUrl.toLowerCase()
   );
   if (existing) {
+    if (input.name?.trim()) existing.name = input.name.trim();
+    if (input.color?.trim()) existing.color = input.color.trim();
+    writeAllSubscriptions(all);
     const fetched = await fetchExternalIcsFeed(existing.id, existing.subscriptionUrl, true);
     return {
       calendar: toCalendarInfoDTO(existing),
@@ -345,7 +423,7 @@ export async function addUserSubscription(
     userKey,
     name: resolvedName,
     subscriptionUrl: normalizedUrl,
-    color: input.color || (normalizedUrl === 'builtin://dk-holidays' ? '#e11d48' : '#0891b2'),
+    color: input.color || (normalizedUrl === 'builtin://dk-holidays' ? '#e11d48' : '#7c3aed'),
     createdAt: new Date().toISOString()
   };
 
@@ -369,12 +447,48 @@ export function removeUserSubscription(creds: CalDavCredentials, subscriptionId:
   return true;
 }
 
+export interface ClientSubscriptionHint {
+  id?: string;
+  name?: string;
+  subscriptionUrl: string;
+  color?: string;
+}
+
 export async function syncUserSubscriptions(
   creds: CalDavCredentials,
+  clientHints?: ClientSubscriptionHint[],
   forceRefresh = false
 ): Promise<{ calendars: CalendarInfoDTO[]; events: CalendarEventDTO[] }> {
   const userKey = getUserKey(creds);
-  const subs = readAllSubscriptions().filter((item) => item.userKey === userKey);
+  const all = readAllSubscriptions();
+
+  // Gendan eventuelle abonnementer gemt i browserens localStorage, hvis containeren har været genstartet
+  if (Array.isArray(clientHints) && clientHints.length > 0) {
+    let changed = false;
+    for (const hint of clientHints) {
+      if (!hint?.subscriptionUrl) continue;
+      const normUrl = normalizeSubscriptionUrl(hint.subscriptionUrl);
+      const exists = all.some(
+        (item) => item.userKey === userKey && item.subscriptionUrl.toLowerCase() === normUrl.toLowerCase()
+      );
+      if (!exists) {
+        all.push({
+          id: normUrl === 'builtin://dk-holidays' ? 'sub::dk-holidays' : (hint.id || `sub::${crypto.randomUUID()}`),
+          userKey,
+          name: hint.name || (normUrl === 'builtin://dk-holidays' ? 'Danske Helligdage' : 'Abonneret Kalender'),
+          subscriptionUrl: normUrl,
+          color: hint.color || (normUrl === 'builtin://dk-holidays' ? '#e11d48' : '#7c3aed'),
+          createdAt: new Date().toISOString()
+        });
+        changed = true;
+      }
+    }
+    if (changed) {
+      writeAllSubscriptions(all);
+    }
+  }
+
+  const subs = all.filter((item) => item.userKey === userKey);
   if (subs.length === 0) {
     return { calendars: [], events: [] };
   }

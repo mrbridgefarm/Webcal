@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { CalDavCredentials } from './davClient.js';
@@ -24,29 +25,64 @@ export interface SharePublicInfo {
   createdAt: string;
 }
 
-const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
-const SHARES_FILE = path.join(DATA_DIR, 'shares.json');
-const KEY_FILE = path.join(DATA_DIR, '.share_secret');
+const PREFERRED_DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
+const FALLBACK_DATA_DIR = path.join(os.tmpdir(), 'dav-sync-data');
 
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+let resolvedDataDir: string | null = null;
+let cachedSecretKey: Buffer | null = null;
+let memoryShares: ShareRecord[] | null = null;
+
+function getWritableDataDir(): string {
+  if (resolvedDataDir) return resolvedDataDir;
+  for (const dir of [PREFERRED_DATA_DIR, FALLBACK_DATA_DIR]) {
+    try {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const probe = path.join(dir, '.write_probe');
+      fs.writeFileSync(probe, 'ok', { mode: 0o600 });
+      fs.unlinkSync(probe);
+      resolvedDataDir = dir;
+      return dir;
+    } catch {
+      // Prøv fallback-mappe hvis /app/data ejes af root i en eksisterende Docker-volume
+    }
   }
+  resolvedDataDir = FALLBACK_DATA_DIR;
+  return resolvedDataDir;
 }
 
 function getSecretKey(): Buffer {
-  ensureDataDir();
+  if (cachedSecretKey) return cachedSecretKey;
+
   if (process.env.SHARE_SECRET) {
-    return crypto.createHash('sha256').update(process.env.SHARE_SECRET).digest();
+    cachedSecretKey = crypto.createHash('sha256').update(process.env.SHARE_SECRET).digest();
+    return cachedSecretKey;
   }
-  if (fs.existsSync(KEY_FILE)) {
-    const hex = fs.readFileSync(KEY_FILE, 'utf8').trim();
-    if (hex.length === 64) {
-      return Buffer.from(hex, 'hex');
+
+  for (const dir of [getWritableDataDir(), PREFERRED_DATA_DIR, FALLBACK_DATA_DIR]) {
+    const keyFile = path.join(dir, '.share_secret');
+    try {
+      if (fs.existsSync(keyFile)) {
+        const hex = fs.readFileSync(keyFile, 'utf8').trim();
+        if (hex.length === 64) {
+          cachedSecretKey = Buffer.from(hex, 'hex');
+          return cachedSecretKey;
+        }
+      }
+    } catch {
+      // Ignorér EACCES hvis en gammel .share_secret ejes af root med 0600
     }
   }
+
   const newKey = crypto.randomBytes(32);
-  fs.writeFileSync(KEY_FILE, newKey.toString('hex'), { mode: 0o600 });
+  cachedSecretKey = newKey;
+  try {
+    const writableKeyFile = path.join(getWritableDataDir(), '.share_secret');
+    fs.writeFileSync(writableKeyFile, newKey.toString('hex'), { mode: 0o600 });
+  } catch {
+    // Bevar nøglen i hukommelsen hvis disk-skrivning fejler
+  }
   return newKey;
 }
 
@@ -85,22 +121,36 @@ export function decryptJson<T>(token: string): T | null {
 }
 
 function readAllShares(): ShareRecord[] {
-  ensureDataDir();
-  if (!fs.existsSync(SHARES_FILE)) {
-    return [];
+  if (memoryShares !== null) {
+    return [...memoryShares];
   }
-  try {
-    const raw = fs.readFileSync(SHARES_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+  for (const dir of [getWritableDataDir(), PREFERRED_DATA_DIR, FALLBACK_DATA_DIR]) {
+    const sharesFile = path.join(dir, 'shares.json');
+    try {
+      if (fs.existsSync(sharesFile)) {
+        const raw = fs.readFileSync(sharesFile, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          memoryShares = parsed;
+          return [...memoryShares];
+        }
+      }
+    } catch {
+      // Ignorér læsefejl
+    }
   }
+  memoryShares = [];
+  return [];
 }
 
 function writeAllShares(records: ShareRecord[]) {
-  ensureDataDir();
-  fs.writeFileSync(SHARES_FILE, JSON.stringify(records, null, 2), 'utf8');
+  memoryShares = [...records];
+  try {
+    const sharesFile = path.join(getWritableDataDir(), 'shares.json');
+    fs.writeFileSync(sharesFile, JSON.stringify(records, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('Kunne ikke skrive shares.json til disk (bevares i hukommelse):', err);
+  }
 }
 
 export function listSharesForUser(username: string): SharePublicInfo[] {

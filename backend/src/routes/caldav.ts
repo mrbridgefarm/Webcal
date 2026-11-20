@@ -264,10 +264,11 @@ caldavRouter.post('/sync', async (req: Request, res: Response) => {
   try {
     const creds = extractCredentials(req);
     const timeRange = req.body?.timeRange as { start: string; end: string } | undefined;
+    const clientSubscriptions = Array.isArray(req.body?.subscriptions) ? req.body.subscriptions : undefined;
 
     const [caldavCalendars, subData] = await Promise.all([
       fetchCalendars(creds),
-      syncUserSubscriptions(creds)
+      syncUserSubscriptions(creds, clientSubscriptions)
     ]);
     const caldavEvents = await fetchAllEvents(creds, caldavCalendars, timeRange);
 
@@ -379,13 +380,24 @@ caldavRouter.delete('/calendars', async (req: Request, res: Response) => {
   }
 });
 
+function extractSubscriptionContext(req: Request): CalDavCredentials {
+  try {
+    return extractCredentials(req);
+  } catch {
+    const rawServer = String(req.body?.serverUrl || process.env.DEFAULT_CALDAV_URL || 'https://caldav.local').trim();
+    const serverUrl = rawServer ? normalizeMailcowUrl(rawServer) : 'https://caldav.local';
+    const username = String(req.body?.username || 'default').trim() || 'default';
+    return { serverUrl, username, password: '' };
+  }
+}
+
 /**
  * POST /api/caldav/subscriptions
  * Abonnerer på en ekstern .ics / webcal:// kalender (Google, Microsoft, Apple m.fl.) eller Danske Helligdage.
  */
 caldavRouter.post('/subscriptions', async (req: Request, res: Response) => {
   try {
-    const creds = extractCredentials(req);
+    const creds = extractSubscriptionContext(req);
     const subscriptionUrl = String(req.body?.subscriptionUrl || '').trim();
     const name = req.body?.name ? String(req.body.name).trim() : undefined;
     const color = req.body?.color ? String(req.body.color).trim() : undefined;
@@ -416,7 +428,7 @@ caldavRouter.post('/subscriptions', async (req: Request, res: Response) => {
  */
 caldavRouter.delete('/subscriptions', async (req: Request, res: Response) => {
   try {
-    const creds = extractCredentials(req);
+    const creds = extractSubscriptionContext(req);
     const id = String(req.body?.id || '').trim();
     if (!id) {
       res.status(400).json({ ok: false, error: 'Abonnements-ID mangler.' });
