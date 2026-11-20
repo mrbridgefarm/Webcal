@@ -18,7 +18,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Keyboard,
-  ShieldCheck
+  ShieldCheck,
+  Pencil
 } from 'lucide-vue-next';
 import { useCalendarStore } from '../stores/calendarStore';
 import type { CalendarEvent, CalendarViewType } from '../types/calendar';
@@ -45,12 +46,25 @@ const showSearchDropdown = computed(
   () => isSearchFocused.value && store.searchQuery.trim().length > 0
 );
 
-function selectSearchResult(ev: CalendarEvent) {
+function goToSearchResultDay(ev: CalendarEvent) {
+  store.selectedEventIds = [ev.id];
+  store.selectedDateStr = ev.start.slice(0, 10);
+  emit('jump-to-date', ev.start);
+  isSearchFocused.value = false;
+}
+
+function editSearchResult(ev: CalendarEvent) {
   store.selectedEventIds = [ev.id];
   store.selectedDateStr = ev.start.slice(0, 10);
   emit('jump-to-date', ev.start);
   store.openEditEventModal(ev);
   isSearchFocused.value = false;
+}
+
+function handleSearchBlur() {
+  window.setTimeout(() => {
+    isSearchFocused.value = false;
+  }, 180);
 }
 
 function formatShortDateTime(ev: CalendarEvent): string {
@@ -153,7 +167,7 @@ function formatShortDateTime(ev: CalendarEvent): string {
           placeholder="Lyn-søg i kalenderen (titel, lokation)..."
           class="w-full pl-9 pr-8 py-1.5 text-sm bg-slate-950/90 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
           @focus="isSearchFocused = true"
-          @blur="setTimeout(() => (isSearchFocused = false), 180)"
+          @blur="handleSearchBlur"
         />
         <button
           v-if="store.searchQuery"
@@ -176,14 +190,13 @@ function formatShortDateTime(ev: CalendarEvent): string {
         >
           Ingen begivenheder matcher "{{ store.searchQuery }}"
         </div>
-        <button
+        <div
           v-for="ev in store.searchResults"
           :key="ev.id"
-          type="button"
-          class="w-full text-left px-3.5 py-2.5 hover:bg-slate-800/90 flex items-center justify-between gap-3 transition"
-          @mousedown.prevent="selectSearchResult(ev)"
+          class="w-full px-3.5 py-2.5 hover:bg-slate-800/90 flex items-center justify-between gap-2.5 transition cursor-pointer"
+          @mousedown.prevent="goToSearchResultDay(ev)"
         >
-          <div class="flex items-center gap-2.5 min-w-0">
+          <div class="flex items-center gap-2.5 min-w-0 flex-1">
             <span
               class="w-2.5 h-2.5 rounded-full shrink-0"
               :style="{ backgroundColor: store.getCalendarById(ev.calendarId)?.color || '#3b82f6' }"
@@ -191,15 +204,32 @@ function formatShortDateTime(ev: CalendarEvent): string {
             <div class="truncate">
               <div class="text-xs font-medium text-slate-100 truncate">{{ ev.title }}</div>
               <div class="text-[11px] text-slate-400 truncate">
-                {{ store.getCalendarById(ev.calendarId)?.name }}
+                {{ formatShortDateTime(ev) }} • {{ store.getCalendarById(ev.calendarId)?.name }}
                 <span v-if="ev.location"> • {{ ev.location }}</span>
               </div>
             </div>
           </div>
-          <span class="text-[11px] text-slate-400 whitespace-nowrap shrink-0">
-            {{ formatShortDateTime(ev) }}
-          </span>
-        </button>
+
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              class="px-2 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600 border border-blue-500/40 text-blue-300 hover:text-white text-[10.5px] font-semibold transition"
+              title="Hop til dagen i kalenderen"
+              @mousedown.stop.prevent="goToSearchResultDay(ev)"
+            >
+              Gå til dag
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[10.5px] font-medium transition"
+              title="Åbn og redigér begivenheden"
+              @mousedown.stop.prevent="editSearchResult(ev)"
+            >
+              <Pencil class="w-3 h-3" />
+              <span>Redigér</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
