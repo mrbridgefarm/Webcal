@@ -1481,7 +1481,7 @@ export const useCalendarStore = defineStore('calendar', () => {
         fetchedEvents = result.events || [];
       }
 
-      const overrides = loadColorOverrides();
+      const overrides = getColorOverrides();
       const localColor = overrides[calObj.id] || null;
       const newCal: CalendarSource = clonePlain({
         ...calObj,
