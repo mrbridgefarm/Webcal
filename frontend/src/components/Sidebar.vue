@@ -7,7 +7,6 @@ import {
   Scissors,
   Bell,
   ClipboardPaste,
-  Copy,
   X,
   Clock,
   Plus,
@@ -19,7 +18,7 @@ import {
 import { useCalendarStore } from '../stores/calendarStore';
 import { requestNotificationPermission } from '../services/notifications';
 import type { CalendarEvent } from '../types/calendar';
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 
 const props = defineProps<{
   width: number;
@@ -96,12 +95,6 @@ async function confirmDeleteCalendar(calId: string, name: string, isSubscribed =
     await store.deleteCalendar(calId);
   }
 }
-
-const selectedEventsList = computed<CalendarEvent[]>(() => {
-  if (store.selectedEventIds.length === 0) return [];
-  const idSet = new Set(store.selectedEventIds);
-  return store.events.filter((e) => idSet.has(e.id));
-});
 
 async function enableNotifications() {
   const perm = await requestNotificationPermission();
@@ -449,12 +442,10 @@ function removeSingleClipboardEvent(evId: string) {
 
     <!-- Bund: Udklipsholder + Del kalender + Papirkurv (30 dage) & Browser Notifikationer -->
     <div v-if="!store.isPublicShareMode" class="space-y-2.5 pt-3 border-t border-slate-800">
-      <!-- Aktiv Udklipsholder placeret i bunden -->
+      <!-- Aktiv Udklipsholder i bunden (vises kun når noget er kopieret/klippet) -->
       <div
-        class="p-3 rounded-xl border transition-all space-y-2"
-        :class="store.clipboard.events.length > 0
-          ? 'bg-emerald-950/20 border-emerald-500/50 shadow-lg shadow-emerald-950/20'
-          : 'bg-slate-950/90 border-slate-800'"
+        v-if="store.clipboard.events.length > 0"
+        class="p-3 rounded-xl border transition-all space-y-2 bg-emerald-950/20 border-emerald-500/50 shadow-lg shadow-emerald-950/20"
       >
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-1.5 text-xs font-bold text-slate-100 truncate">
@@ -463,7 +454,7 @@ function removeSingleClipboardEvent(evId: string) {
             <span class="truncate">Udklipsholder</span>
           </div>
 
-          <div v-if="store.clipboard.events.length > 0" class="flex items-center gap-1 shrink-0">
+          <div class="flex items-center gap-1 shrink-0">
             <span
               class="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
               :class="store.clipboard.mode === 'CUT'
@@ -484,7 +475,7 @@ function removeSingleClipboardEvent(evId: string) {
         </div>
 
         <!-- Liste over kopierede/klippede aftaler i udklipsholderen -->
-        <div v-if="store.clipboard.events.length > 0" class="space-y-2">
+        <div class="space-y-2">
           <div class="max-h-40 overflow-y-auto space-y-1.5 pr-0.5">
             <div
               v-for="ev in store.clipboard.events"
@@ -532,33 +523,6 @@ function removeSingleClipboardEvent(evId: string) {
             </button>
           </div>
         </div>
-
-        <!-- Hvis udklipsholderen er tom, men brugeren har klikket på en aftale -->
-        <div v-else-if="selectedEventsList.length > 0" class="space-y-2">
-          <div class="text-[11px] text-blue-300 font-medium">
-            Markeret nu ({{ selectedEventsList.length }}):
-          </div>
-          <div
-            v-for="selEv in selectedEventsList.slice(0, 3)"
-            :key="selEv.id"
-            class="p-2 rounded-lg bg-slate-900 border border-blue-500/40 text-xs"
-          >
-            <div class="font-semibold text-slate-100 truncate">{{ selEv.title }}</div>
-            <div class="text-[10px] text-slate-400 mt-0.5 truncate">{{ formatEventTimeSpan(selEv) }}</div>
-          </div>
-          <button
-            type="button"
-            class="w-full py-1.5 px-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition"
-            @click="store.copyOrCutSelection('COPY')"
-          >
-            <Copy class="w-3.5 h-3.5 shrink-0" />
-            <span class="truncate">Kopiér (Ctrl+C)</span>
-          </button>
-        </div>
-
-        <p v-else class="text-[11px] text-slate-400 leading-relaxed">
-          Markér en aftale og tryk <kbd class="px-1 py-0.5 bg-slate-800 rounded text-[10px] text-slate-200">Ctrl+C</kbd>, klik på en ny dag og tryk <kbd class="px-1 py-0.5 bg-slate-800 rounded text-[10px] text-slate-200">Ctrl+V</kbd>.
-        </p>
       </div>
 
       <div class="grid grid-cols-2 gap-1.5">
