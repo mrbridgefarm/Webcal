@@ -20,7 +20,7 @@ Traditionelle webkalendere kræver ofte utallige museklik og formularer, når ma
 
 ### 📋 1. Ægte Copy / Cut / Paste på tværs af dage (`Ctrl+C`, `Ctrl+X`, `Ctrl+V`)
 * **Lynhurtig vagtplanlægning & time-blocking:** Klik på én eller flere aftaler (med `Ctrl`/`Shift`-klik) — eller markér en hel dag — og tryk `Ctrl+C` (kopiér) eller `Ctrl+X` (klip).
-* **Visuel Udklipsholder:** Udklipsholderen er placeret praktisk i bunden af sidepanelet, så den aldrig overskygger dine kalendere. Kopi- eller klip-status vises med badges direkte på aftalen i kalendergitteret samt i den flydende handlingslinje.
+* **Visuel Udklipsholder:** Udklipsholderen er placeret praktisk i bunden af sidepanelet, så den aldrig overskygger dine kalendere. Kopi- eller klip-status vises desuden med badges direkte på aftalen i kalendergitteret.
 * **Bevarer klokkeslæt og varighed:** Vælg en hvilken som helst ny dato i kalenderen (fremhæves med en tydelig blå ramme) og tryk `Ctrl+V` — aftalen indsættes med præcis samme start- og sluttidspunkt.
 
 ### 📆 2. 5 Fleksible Kalendervisninger & Danske Ugenumre
